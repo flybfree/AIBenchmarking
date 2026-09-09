@@ -45,11 +45,29 @@ judge:
   api_key: "env:OPENAI_API_KEY"
 ```
 
-```bash
-# set the key in your shell (PowerShell), then run
+Set the key in your environment (the key never touches the config file or git):
+
+```powershell
+# This session only — lost when you close the window:
 $env:OPENAI_API_KEY = "sk-..."
 python -m aibench run --config configs/example.yaml --judge
 ```
+
+```powershell
+# Persistent (survives reboots) — but note the caveat below:
+setx OPENAI_API_KEY "sk-..."
+```
+
+> **Gotcha (Windows):** `setx` only affects **new** processes. A terminal that
+> was already open won't see it — open a **new** window, or load it into the
+> current one: `$env:OPENAI_API_KEY = [Environment]::GetEnvironmentVariable('OPENAI_API_KEY','User')`.
+> Verify with `[bool]$env:OPENAI_API_KEY` (prints `True`). On macOS/Linux use
+> `export OPENAI_API_KEY=sk-...` (add it to your shell profile to persist).
+
+The run does a **judge preflight** before the benchmark, so a missing/invalid
+key fails in seconds (not after a full run) with a clear message. If the key
+isn't set you'll see `Judge preflight FAILED: HTTP 401` — fix the key and retry,
+or pass `--no-judge`.
 
 > A hosted judge is the most impartial option (it isn't one of the models under
 > test), but it **sends the models' outputs and the task prompts — including the
