@@ -99,12 +99,18 @@ def _quality_cell(a: Aggregate) -> str:
     return f"<b class='{_quality_class(a.quality_mean)}'>{a.quality_mean:.2f}</b>"
 
 
+def _judge_cell(a: Aggregate) -> str:
+    if a.judge_mean is None:
+        return "<span class='muted'>—</span>"
+    return f"<b class='{_quality_class(a.judge_mean)}'>{a.judge_mean:.2f}</b>"
+
+
 def _table(aggs: list[Aggregate]) -> str:
     head = (
         "<tr><th>Endpoint</th><th>Hardware</th><th>Model</th><th>Task/Group</th>"
         "<th>tok/s (mean)</th><th>tok/s (median)</th><th>TTFT ms (mean)</th>"
         "<th>TTFT ms p95</th><th>total s</th><th>out tok</th>"
-        "<th>quality</th><th>ok/n</th><th>notes</th></tr>"
+        "<th>quality</th><th>judge</th><th>ok/n</th><th>notes</th></tr>"
     )
 
     def cell(v, fmt="{:.1f}"):
@@ -144,6 +150,7 @@ def _table(aggs: list[Aggregate]) -> str:
             f"<td class='num'>{cell(a.total_s_mean, '{:.2f}')}</td>"
             f"<td class='num'>{cell(a.completion_tokens_mean, '{:.0f}')}</td>"
             f"<td class='num'>{_quality_cell(a)}</td>"
+            f"<td class='num'>{_judge_cell(a)}</td>"
             f"<td class='num'>{a.n_ok}/{a.n}</td>"
             f"<td class='muted'>{notes(a)}</td>"
             "</tr>"

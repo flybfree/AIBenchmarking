@@ -53,6 +53,8 @@ class Aggregate:
     tps_fallback_n: int = 0            # runs whose tok/s fell back to /total_s
     quality_mean: float | None = None  # Phase 2 reference score in [0, 1]
     quality_n: int = 0                 # runs with a quality score
+    judge_mean: float | None = None    # Phase 3 LLM-judge score in [0, 1]
+    judge_n: int = 0                   # runs with a judge score
     errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -82,6 +84,7 @@ def aggregate(
         tps = [r.tokens_per_s for r in ok]
         ttft = [r.ttft_s * 1000 for r in ok if r.ttft_s is not None]
         quals = [r.quality for r in ok if getattr(r, "quality", None) is not None]
+        judges = [r.judge_score for r in ok if getattr(r, "judge_score", None) is not None]
         agg = Aggregate(
             endpoint=endpoint,
             model=sample.model,
@@ -107,6 +110,8 @@ def aggregate(
             tps_fallback_n=sum(1 for r in ok if getattr(r, "tps_from_total", False)),
             quality_mean=_stat(quals, statistics.mean),
             quality_n=len(quals),
+            judge_mean=_stat(judges, statistics.mean),
+            judge_n=len(judges),
             errors=[r.error for r in rs if r.error][:5],
         )
         out.append(agg)

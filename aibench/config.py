@@ -53,6 +53,10 @@ class RunConfig:
     #   (heavy reasoners can spend 4k+ tokens thinking before the answer)
     output_dir: str = "results"
     label: str = ""                        # optional label for this run
+    # Optional Phase 3 LLM-judge endpoint (OpenAI-compatible). When set, judged
+    # (subjective) tasks get a graduated 1-5 rubric score. Point it at a strong
+    # model; it need not be one of the endpoints under test.
+    judge: Endpoint | None = None
 
     @staticmethod
     def load(path: str | Path) -> "RunConfig":
@@ -72,6 +76,8 @@ class RunConfig:
             raise ValueError("Config must define at least one endpoint.")
         known = {f for f in RunConfig.__dataclass_fields__ if f != "endpoints"}
         kwargs = {k: v for k, v in data.items() if k in known}
+        if isinstance(kwargs.get("judge"), dict):
+            kwargs["judge"] = Endpoint(**kwargs["judge"])
         return RunConfig(endpoints=eps, **kwargs)
 
     def to_dict(self) -> dict[str, Any]:

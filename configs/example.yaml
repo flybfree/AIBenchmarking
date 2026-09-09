@@ -8,7 +8,14 @@ parallel_endpoints: true   # OK here: Prism and Area-51 are separate machines
 # max_tokens: 512   # optional global cap (overrides per-task defaults)
 
 tasks:
-  - all             # or: creative_writing, code_generation, summarization, tool_use
+  - all             # creative_writing, code_generation, summarization, tool_use, agents
+
+# Phase 3 LLM-judge (optional): graduated 1-5 rubric quality for subjective tasks.
+# Point it at a strong model (ideally not one under test). Enable with --judge.
+# judge:
+#   name: "judge"
+#   base_url: "http://192.168.3.89:1234/v1"
+#   model: "davidau/qwen3.8-27b-turbo-fable-cold-fusion-735-882-heretic-uncensored-neo-coder-max-mtp-gguf/qwen3.8-27b-turbofcfusion-735-882-here-uncen-neo-coder-max-mtp-q4_k_s.gguf"
 
 endpoints:
   - name: "Prism"

@@ -40,6 +40,9 @@ CREATIVE_WRITING = TaskSuite(
     tasks=[
         Task(
             id="cw_short_story", category="creative_writing", difficulty="easy",
+            rubric=("Judge overall story quality: a clear beginning, middle and "
+                    "end; vivid, engaging prose; and faithfulness to the prompt "
+                    "(a lighthouse keeper who discovers the light talks back)."),
             prompt=(
                 "Write a 400-word short story about a lighthouse keeper who "
                 "discovers the light is talking back. Give it a clear beginning, "
@@ -50,6 +53,8 @@ CREATIVE_WRITING = TaskSuite(
         ),
         Task(
             id="cw_poem", category="creative_writing", difficulty="easy",
+            rubric=("Judge poem quality: evocative imagery, cohesion, rhythm, and "
+                    "fit to the theme (first snowfall in a quiet mountain town)."),
             prompt=(
                 "Write a vivid four-stanza poem about the first snowfall in a "
                 "quiet mountain town."
@@ -206,6 +211,8 @@ SUMMARIZATION = TaskSuite(
     tasks=[
         Task(
             id="sum_article", category="summarization", difficulty="easy",
+            rubric=("Judge summary quality: faithful to the source, captures the "
+                    "key points, concise, and introduces no fabricated claims."),
             prompt=(
                 "Summarize the following text in exactly three bullet points, "
                 "each under 20 words:\n\n" + _ARTICLE
@@ -223,6 +230,8 @@ SUMMARIZATION = TaskSuite(
         ),
         Task(
             id="sum_tldr", category="summarization", difficulty="medium",
+            rubric=("Judge the one-sentence TL;DR: accurate, captures the core "
+                    "idea, and genuinely concise."),
             prompt=(
                 "Give a single-sentence TL;DR (one sentence only) of:\n\n"
                 + _ARTICLE
@@ -238,6 +247,8 @@ SUMMARIZATION = TaskSuite(
         ),
         Task(
             id="sum_action_items", category="summarization", difficulty="hard",
+            rubric=("Judge extraction quality: captures the real action items with "
+                    "the correct owners, omits non-actions, and invents nothing."),
             system="Extract only the action items as bullet points.",
             prompt=(
                 "List the action items from this meeting transcript as bullet "

@@ -15,7 +15,22 @@ Scoring is intentionally phased (the architecture is pluggable):
 |-------|------------------|--------|
 | **1** | Performance: tokens/sec, time-to-first-token (TTFT), total latency, throughput | ✅ |
 | **2** | Reference-based quality: code execution, SQL execution, format & keyword checks, tool-call correctness | ✅ |
-| **3** | LLM-as-judge for subjective tasks (creative writing) | optional |
+| **3** | LLM-as-judge: graduated 1–5 rubric quality for subjective tasks | ✅ |
+
+### Phase 3 quality scoring (LLM-judge)
+
+Objective checks answer "did it work"; they can't rank *how good* a story or
+summary is (they ceiling at 1.0). The judge scores subjective tasks (creative
+writing, summary quality) on a **1–5 rubric** via any OpenAI-compatible endpoint,
+normalised to `[0,1]` and reported in a separate **judge** column. Configure a
+`judge:` endpoint (point it at a strong model, ideally not one under test) and
+enable with `--judge`:
+
+```bash
+python -m aibench run --config configs/example.yaml --judge
+```
+
+Only tasks with a `rubric` are judged; see [judge.py](aibench/scoring/judge.py).
 
 ### Phase 2 quality scoring
 

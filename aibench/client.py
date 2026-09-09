@@ -61,6 +61,10 @@ class RequestResult:
     check_scores: dict[str, float] = field(default_factory=dict)
     score_note: str = ""
 
+    # Phase 3 LLM-judge (filled in by aibench.scoring.judge).
+    judge_score: float | None = None       # graduated quality in [0, 1] (from 1-5)
+    judge_note: str = ""
+
     # A generation window shorter than this (absolute) OR shorter than this
     # fraction of the total request is treated as a burst: the tokens arrived
     # all at once (typically a batching/scheduling artifact under concurrency),

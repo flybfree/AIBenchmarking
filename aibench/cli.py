@@ -52,7 +52,15 @@ reasoning_reserve: 8192  # extra tokens for thinking, added on top of the answer
                          # (heavy reasoners can spend 4k+ tokens before answering)
 
 tasks:
-  - all             # or: creative_writing, code_generation, summarization, tool_use
+  - all             # creative_writing, code_generation, summarization, tool_use, agents
+
+# Optional Phase 3 LLM-judge: scores subjective tasks (creative, summaries) on a
+# 1-5 rubric so quality actually separates models. Point it at a strong model;
+# it need not be one of the endpoints under test. Enable at runtime with --judge.
+# judge:
+#   name: "judge"
+#   base_url: "http://192.168.3.89:1234/v1"
+#   model: "some-strong-model"
 
 endpoints:
   - name: "rig1-llama3-8b"
@@ -179,6 +187,15 @@ def _cmd_run(args) -> int:
         n = score_results(output.results)
         out(f"\nScored {n} results (reference-based quality checks).")
 
+    if cfg.judge and not args.no_judge:
+        from .scoring.judge import judge_results
+        out(f"Judging subjective tasks with {cfg.judge.model} @ {cfg.judge.base_url} ...")
+        nj = asyncio.run(judge_results(output.results, cfg.judge,
+                                       timeout_s=cfg.timeout_s, concurrency=cfg.concurrency))
+        out(f"Judged {nj} responses (LLM-judge, 1-5 rubric).")
+    elif args.judge and not cfg.judge:
+        out("--judge given but no `judge:` endpoint in config; skipping judging.")
+
     json_path = save_run(output, cfg.output_dir)
     out(f"Saved raw results -> {json_path}")
 
@@ -303,6 +320,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "SEPARATE machines (shared-GPU endpoints would skew timings).")
     r.add_argument("--no-score", action="store_true",
                    help="Skip Phase 2 reference-based quality scoring.")
+    r.add_argument("--judge", action="store_true",
+                   help="Run the Phase 3 LLM-judge (requires a `judge:` endpoint in config).")
+    r.add_argument("--no-judge", action="store_true",
+                   help="Skip LLM-judging even if a judge endpoint is configured.")
     r.add_argument("--open", action="store_true", help="Open the HTML report when done.")
     r.set_defaults(func=_cmd_run)
 
