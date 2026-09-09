@@ -70,27 +70,61 @@ def parse_score(text: str) -> tuple[int | None, str]:
     return None, f"could not parse score from: {text.strip()[:80]!r}"
 
 
+def _headers(judge: Endpoint) -> dict[str, str]:
+    h = {"Content-Type": "application/json"}
+    key = judge.resolved_key
+    if key and key != "not-needed":
+        h["Authorization"] = f"Bearer {key}"
+    return h
+
+
+async def _adaptive_chat(
+    client: httpx.AsyncClient, judge: Endpoint,
+    messages: list[dict[str, str]], timeout_s: float, token_limit: int,
+) -> httpx.Response:
+    """POST a non-streaming chat completion, adapting to provider quirks:
+    newer OpenAI models require `max_completion_tokens` (not `max_tokens`) and
+    some reject a non-default `temperature`. Retries on those specific 400s so
+    the same judge config works for local servers and hosted models alike.
+    User-supplied `judge.params` always win (no auto token param is added if the
+    user set one)."""
+    use_completion_tokens = False
+    include_temp = True
+    r: httpx.Response | None = None
+    for _ in range(4):
+        payload: dict[str, Any] = {
+            "model": judge.model, "messages": messages, "stream": False,
+        }
+        if not ({"max_tokens", "max_completion_tokens"} & set(judge.params)):
+            key = "max_completion_tokens" if use_completion_tokens else "max_tokens"
+            payload[key] = token_limit
+        if include_temp and "temperature" not in judge.params:
+            payload["temperature"] = 0.0
+        payload.update(judge.params)
+
+        r = await client.post(judge.chat_url, json=payload,
+                              headers=_headers(judge), timeout=timeout_s)
+        if r.status_code == 400:
+            body = r.text.lower()
+            if "max_completion_tokens" in body and not use_completion_tokens:
+                use_completion_tokens = True
+                continue
+            if "temperature" in body and include_temp:
+                include_temp = False
+                continue
+        return r
+    return r  # type: ignore[return-value]
+
+
 async def _judge_one(
     client: httpx.AsyncClient, judge: Endpoint, task: Task,
     result: RequestResult, timeout_s: float,
 ) -> tuple[float | None, str]:
-    payload = {
-        "model": judge.model,
-        "messages": _build_messages(task, result),
-        "stream": False,
-        "temperature": 0.0,
-        "max_tokens": 1024,   # headroom in case the judge is a reasoning model
-    }
-    payload.update(judge.params)
-    headers = {"Content-Type": "application/json"}
-    key = judge.resolved_key
-    if key and key != "not-needed":
-        headers["Authorization"] = f"Bearer {key}"
     try:
-        r = await client.post(judge.chat_url, json=payload, headers=headers,
-                              timeout=timeout_s)
+        r = await _adaptive_chat(client, judge, _build_messages(task, result),
+                                 timeout_s, token_limit=1024)
         if r.status_code != 200:
-            return None, f"judge HTTP {r.status_code}"
+            return None, f"judge HTTP {r.status_code}: {r.text[:120].strip()}"
         content = r.json()["choices"][0]["message"].get("content") or ""
     except (httpx.HTTPError, KeyError, ValueError, IndexError) as e:
         return None, f"judge error: {type(e).__name__}: {e}"
@@ -105,20 +139,11 @@ async def preflight(judge: Endpoint, timeout_s: float = 30.0) -> tuple[bool, str
     """Validate the judge endpoint (reachable, authorized, model exists, returns
     a parseable score) with one tiny call, so a misconfigured judge fails fast
     instead of after a full benchmark."""
-    payload = {
-        "model": judge.model,
-        "messages": [{"role": "user",
-                      "content": 'Reply with only this JSON: {"score": 5, "reason": "ok"}'}],
-        "stream": False, "temperature": 0.0, "max_tokens": 64,
-    }
-    headers = {"Content-Type": "application/json"}
-    key = judge.resolved_key
-    if key and key != "not-needed":
-        headers["Authorization"] = f"Bearer {key}"
+    msgs = [{"role": "user",
+             "content": 'Reply with only this JSON: {"score": 5, "reason": "ok"}'}]
     try:
         async with httpx.AsyncClient() as client:
-            r = await client.post(judge.chat_url, json=payload, headers=headers,
-                                  timeout=timeout_s)
+            r = await _adaptive_chat(client, judge, msgs, timeout_s, token_limit=256)
     except httpx.HTTPError as e:
         return False, f"cannot reach judge: {type(e).__name__}: {e}"
     if r.status_code != 200:
