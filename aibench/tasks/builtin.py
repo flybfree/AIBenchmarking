@@ -621,6 +621,57 @@ REASONING = TaskSuite(
             "5 but NOT by 15?",
             ["401"],  # (333+200-66) - 66
         ),
+        # --- fuller expert set: a cluster of hard counting/logic problems so a
+        #     smaller model's per-problem error rate compounds into a real gap ---
+        _reason(
+            "reason_x_inclusion", "hard",
+            "How many integers from 1 to 100 inclusive are divisible by 2, 3, or 5?",
+            ["74"],  # inclusion-exclusion
+        ),
+        _reason(
+            "reason_x_mississippi", "hard",
+            "How many distinct arrangements of the letters of MISSISSIPPI have no "
+            "two S's adjacent?",
+            ["7350"],  # 7!/(4!2!) * C(8,4) = 105 * 70
+        ),
+        _reason(
+            "reason_x_dice", "hard",
+            "Two fair six-sided dice are rolled. In how many of the 36 equally "
+            "likely outcomes is the sum equal to 7 OR the product equal to 12?",
+            ["8"],  # 6 + 4 - 2 overlap
+        ),
+        _reason(
+            "reason_x_divisorsum", "hard",
+            "What is the sum of all positive divisors of 360 (including 1 and 360)?",
+            ["1170"],  # sigma(360) = 15*13*6
+        ),
+        _reason(
+            "reason_x_recurrence", "hard",
+            "A sequence is defined by a1 = 2, a2 = 3, and a(n) = a(n-1) + a(n-2) "
+            "for n >= 3. What is a8 (the 8th term)?",
+            ["55"],  # 2,3,5,8,13,21,34,55
+        ),
+        _reason(
+            "reason_x_sumnine", "hard",
+            "How many 4-digit numbers have no digit equal to zero and have digits "
+            "that sum to 9?",
+            ["56"],  # compositions of 9 into 4 parts each >=1: C(8,3)
+        ),
+        _reason(
+            "reason_x_banana", "hard",
+            "How many distinct arrangements of the letters of BANANA have no two "
+            "A's adjacent?",
+            ["12"],  # arrange B,N,N (3 ways) then place 3 A's in C(4,3)=4 gaps
+        ),
+        _reason(
+            "reason_x_houses", "hard",
+            "Four houses stand in a row (positions 1 to 4), each a different "
+            "colour: red, blue, green, yellow. The green house is immediately to "
+            "the right of the red house. The blue house is at position 1. The "
+            "yellow house is not adjacent to the green house. What colour is the "
+            "house at position 2?",
+            ["yellow"],  # B, Y, R, G
+        ),
     ],
 )
 
