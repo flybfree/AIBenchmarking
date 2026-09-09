@@ -190,6 +190,8 @@ def _cmd_run(args) -> int:
         cfg.reasoning_reserve = args.reasoning_reserve
     if args.repeats is not None:
         cfg.repeats = args.repeats
+    if args.concurrency is not None:
+        cfg.concurrency = args.concurrency
     if args.parallel_endpoints is not None:
         cfg.parallel_endpoints = args.parallel_endpoints
     # Fail fast on a misconfigured judge before running the whole benchmark.
@@ -371,6 +373,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Extra output tokens added on top of the answer budget "
                         "so reasoning models have room to think (default 8192).")
     r.add_argument("--repeats", type=int, help="Override measured runs per task.")
+    r.add_argument("--concurrency", type=int,
+                   help="Override concurrent requests per endpoint (1 = single-stream, "
+                        "isolates true per-request latency).")
     r.add_argument("--parallel-endpoints", dest="parallel_endpoints",
                    action="store_true", default=None,
                    help="Benchmark all endpoints at once. Only for endpoints on "
