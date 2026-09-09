@@ -1,35 +1,32 @@
 """Cross-endpoint diagnostics.
 
 When two or more endpoints run the *same model*, some result patterns point to
-a setup problem rather than a genuine hardware/model difference. These checks
-compare same-model endpoints and surface plain-language warnings:
+a setup problem rather than a genuine hardware/model difference:
 
   * offload  — one endpoint's throughput is a small fraction of a peer's on the
-    same model, which usually means the model didn't fit in VRAM and spilled to
-    CPU (or a much heavier quant/config is loaded).
+    same model, usually meaning the model didn't fit in VRAM and spilled to CPU
+    (or a heavier quant/config is loaded).
   * ttft     — one endpoint's time-to-first-token is far higher than a peer's
-    without a matching throughput gain, which usually means a server-config
-    difference (request batching, context length) rather than hardware.
+    without a matching throughput gain, usually a server-config difference
+    (request batching, context length) or extra load, not hardware.
 
-Thresholds are deliberately loose so an ordinary GPU-vs-GPU gap (a ~1.5-2x
-bandwidth difference) does not trip them.
+Comparisons are done **per use case (category)** and use the **median** across
+repeats, so an anomaly concentrated in a few categories isn't hidden by pooling,
+and a single slow outlier doesn't skew a mean. Findings are then coalesced into
+one message per (endpoint, kind) that lists every affected use case. Thresholds
+stay loose so an ordinary GPU-vs-GPU gap (~1.5-2x) doesn't trip them.
 """
 
 from __future__ import annotations
 
-import statistics
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from statistics import median
 
 from .client import RequestResult
 
-# A peer more than this many times faster => the slow side looks bottlenecked.
-OFFLOAD_RATIO = 2.5
-# TTFT this many times a peer's, without a matching throughput edge, looks like
-# a config difference.
-TTFT_RATIO = 1.8
-# "matching throughput edge": the slow-prefill endpoint must be at least this
-# many times the peer's throughput to justify its higher TTFT.
-TTFT_TPS_EXCUSE = 1.3
+OFFLOAD_RATIO = 2.5     # peer this many x faster => slow side looks bottlenecked
+TTFT_RATIO = 1.8        # TTFT this many x a peer's => suspicious
+TTFT_TPS_EXCUSE = 1.3   # ...unless throughput is at least this many x the peer's
 
 
 @dataclass
@@ -38,29 +35,31 @@ class Diagnostic:
     endpoint: str
     model: str
     message: str
+    categories: list[str] = field(default_factory=list)
 
 
-@dataclass
-class _EP:
-    endpoint: str
-    tps: float | None
-    ttft_ms: float | None
-
-
-def _per_endpoint(results: list[RequestResult], model: str) -> list[_EP]:
-    by_ep: dict[str, list[RequestResult]] = {}
+def _by_model_category(
+    results: list[RequestResult], model: str
+) -> dict[str, dict[str, tuple[float | None, float | None]]]:
+    """{category: {endpoint: (median tok/s, median TTFT ms)}} for one model."""
+    raw: dict[str, dict[str, dict[str, list[float]]]] = {}
     for r in results:
-        if r.model == model and r.ok:
-            by_ep.setdefault(r.endpoint, []).append(r)
-    out: list[_EP] = []
-    for ep, rs in by_ep.items():
-        tps = [r.tokens_per_s for r in rs if r.tokens_per_s]
-        ttft = [r.ttft_s * 1000 for r in rs if r.ttft_s is not None]
-        out.append(_EP(
-            endpoint=ep,
-            tps=statistics.mean(tps) if tps else None,
-            ttft_ms=statistics.mean(ttft) if ttft else None,
-        ))
+        if r.model != model or not r.ok or not r.category:
+            continue
+        slot = raw.setdefault(r.category, {}).setdefault(
+            r.endpoint, {"tps": [], "ttft": []}
+        )
+        if r.tokens_per_s:
+            slot["tps"].append(r.tokens_per_s)
+        if r.ttft_s is not None:
+            slot["ttft"].append(r.ttft_s * 1000)
+    out: dict[str, dict[str, tuple[float | None, float | None]]] = {}
+    for cat, eps in raw.items():
+        out[cat] = {
+            ep: (median(v["tps"]) if v["tps"] else None,
+                 median(v["ttft"]) if v["ttft"] else None)
+            for ep, v in eps.items()
+        }
     return out
 
 
@@ -68,56 +67,52 @@ def diagnose(results: list[RequestResult]) -> list[Diagnostic]:
     out: list[Diagnostic] = []
     models = sorted({r.model for r in results if r.ok})
     for model in models:
-        eps = _per_endpoint(results, model)
-        if len(eps) < 2:
-            continue
+        cats = _by_model_category(results, model)
+        # endpoint -> list of per-category hits
+        offload: dict[str, list[tuple]] = {}
+        ttft: dict[str, list[tuple]] = {}
 
-        # --- offload / underperformance ---
-        tps_eps = [e for e in eps if e.tps]
-        if len(tps_eps) >= 2:
-            best = max(tps_eps, key=lambda e: e.tps)
-            for e in tps_eps:
-                if e is best:
-                    continue
-                if best.tps >= OFFLOAD_RATIO * e.tps:
-                    pct = 100 * e.tps / best.tps
-                    out.append(Diagnostic(
-                        kind="offload",
-                        endpoint=e.endpoint,
-                        model=model,
-                        message=(
-                            f"{e.endpoint} runs {model} at {e.tps:.1f} tok/s - only "
-                            f"{pct:.0f}% of {best.endpoint}'s {best.tps:.1f} tok/s on "
-                            f"the same model. Likely the model doesn't fit in VRAM and "
-                            f"is offloading to CPU (or a heavier quant/config is loaded). "
-                            f"Check GPU offload / model size on {e.endpoint}."
-                        ),
-                    ))
+        for cat, eps in cats.items():
+            tps = {ep: t for ep, (t, _) in eps.items() if t}
+            if len(tps) >= 2:
+                best_ep = max(tps, key=tps.get)
+                for ep, t in tps.items():
+                    if ep != best_ep and tps[best_ep] >= OFFLOAD_RATIO * t:
+                        offload.setdefault(ep, []).append((cat, t, tps[best_ep], best_ep))
 
-        # --- TTFT out of line with throughput ---
-        ttft_eps = [e for e in eps if e.ttft_ms and e.tps]
-        if len(ttft_eps) >= 2:
-            fastest_prefill = min(ttft_eps, key=lambda e: e.ttft_ms)
-            for e in ttft_eps:
-                if e is fastest_prefill:
-                    continue
-                higher_ttft = e.ttft_ms >= TTFT_RATIO * fastest_prefill.ttft_ms
-                justified = e.tps >= TTFT_TPS_EXCUSE * fastest_prefill.tps
-                if higher_ttft and not justified:
-                    ratio = e.ttft_ms / fastest_prefill.ttft_ms
-                    out.append(Diagnostic(
-                        kind="ttft",
-                        endpoint=e.endpoint,
-                        model=model,
-                        message=(
-                            f"{e.endpoint} time-to-first-token ({e.ttft_ms:.0f} ms) is "
-                            f"{ratio:.1f}x {fastest_prefill.endpoint}'s "
-                            f"({fastest_prefill.ttft_ms:.0f} ms) on the same model, but "
-                            f"throughput is comparable ({e.tps:.1f} vs "
-                            f"{fastest_prefill.tps:.1f} tok/s). Points to a server-config "
-                            f"difference (request batching, context length) rather than "
-                            f"hardware; match {e.endpoint}'s settings to "
-                            f"{fastest_prefill.endpoint} for a fair comparison."
-                        ),
-                    ))
+            pref = {ep: (tt, t) for ep, (t, tt) in eps.items() if tt and t}
+            if len(pref) >= 2:
+                fast_ep = min(pref, key=lambda e: pref[e][0])
+                f_ttft, f_tps = pref[fast_ep]
+                for ep, (tt, t) in pref.items():
+                    if ep != fast_ep and tt >= TTFT_RATIO * f_ttft and t < TTFT_TPS_EXCUSE * f_tps:
+                        ttft.setdefault(ep, []).append((cat, tt, f_ttft, fast_ep, t, f_tps))
+
+        for ep, hits in offload.items():
+            names = sorted(h[0] for h in hits)
+            cat, t, best_tps, best_ep = min(hits, key=lambda h: h[1] / h[2])
+            pct = 100 * t / best_tps
+            out.append(Diagnostic(
+                "offload", ep, model,
+                f"{ep} underperforms {best_ep} on {model} in {len(names)} use case(s) "
+                f"({', '.join(names)}). Worst: {cat} at {t:.0f} tok/s = {pct:.0f}% of "
+                f"{best_ep}'s {best_tps:.0f}. Likely VRAM offload to CPU or a heavier "
+                f"quant/config; check GPU offload and model load on {ep}.",
+                categories=names,
+            ))
+
+        for ep, hits in ttft.items():
+            names = sorted(h[0] for h in hits)
+            cat, tt, f_ttft, fast_ep, t, f_tps = max(hits, key=lambda h: h[1] / h[2])
+            ratio = tt / f_ttft
+            out.append(Diagnostic(
+                "ttft", ep, model,
+                f"{ep} time-to-first-token runs up to {ratio:.1f}x {fast_ep}'s on "
+                f"{model} in {len(names)} use case(s) ({', '.join(names)}) without a "
+                f"matching throughput gain. Worst: {cat}, {tt:.0f} vs {f_ttft:.0f} ms "
+                f"at {t:.0f} vs {f_tps:.0f} tok/s. Points to a server-config difference "
+                f"(batching, context length) or load on {ep}, not hardware; match its "
+                f"settings to {fast_ep}.",
+                categories=names,
+            ))
     return out
