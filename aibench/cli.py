@@ -110,7 +110,7 @@ def _cmd_init_config(args) -> int:
 def _build_report(payload: dict, out_html: Path) -> Path:
     from .client import RequestResult
     from .diagnose import diagnose
-    from .compare import compare_categories, variance_flags
+    from .compare import compare_categories, variance_flags, compare_quality
     from .scorecard import build_profiles, use_case_fit
     results = [RequestResult(**r) for r in payload["results"]]
     by_task = aggregate(results, group_key="task")
@@ -133,6 +133,7 @@ def _build_report(payload: dict, out_html: Path) -> Path:
         variance=variance_flags(by_cat),
         profiles=profiles, categories=categories,
         fits=use_case_fit(by_cat),
+        quality_comparisons=compare_quality(results),
     )
 
 
@@ -158,6 +159,20 @@ def _print_comparison(by_cat) -> None:
         z = f"Δ/SE={c.z:.1f}" if c.z is not None else ""
         out(f"  {c.category:16} {c.faster} {c.faster_mean:.1f} vs "
             f"{c.slower} {c.slower_mean:.1f} tok/s  (+{c.pct:.0f}%, {verdict} {z})")
+
+
+def _print_quality_comparison(results) -> None:
+    from .compare import compare_quality
+    comps = compare_quality(results)
+    real = [c for c in comps if c.significant]
+    if not real:
+        out("\nQuality head-to-head: no significant quality differences "
+            "(same-model gaps are within noise).")
+        return
+    out("\nHead-to-head quality (significant differences only):")
+    for c in real:
+        out(f"  {c.category:16} {c.leader} {c.leader_mean:.2f} vs "
+            f"{c.other} {c.other_mean:.2f}  ({c.note})")
 
 
 def _print_summary(by_cat) -> None:
@@ -238,6 +253,7 @@ def _cmd_run(args) -> int:
     _print_summary(by_cat)
     _print_diagnostics(results)
     _print_comparison(by_cat)
+    _print_quality_comparison(results)
 
     html_path = json_path.with_suffix(".html")
     _build_report(payload, html_path)
@@ -315,6 +331,7 @@ def _cmd_score(args) -> int:
     _print_summary(by_cat)
     _print_diagnostics(results)
     _print_comparison(by_cat)
+    _print_quality_comparison(results)
 
     out_html = Path(args.out) if args.out else Path(args.results).with_suffix(".html")
     _build_report(payload, out_html)

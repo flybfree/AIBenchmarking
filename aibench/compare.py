@@ -14,8 +14,10 @@ flag any endpoint whose throughput is noisy (high coefficient of variation).
 from __future__ import annotations
 
 import math
+import statistics
 from dataclasses import dataclass
 
+from .client import RequestResult
 from .metrics import Aggregate
 
 # z = |Δ| / SE above this => call the difference significant. ~2 is nominally
@@ -107,4 +109,83 @@ def compare_categories(by_category: list[Aggregate]) -> list[Comparison]:
             faster_mean=m1, slower_mean=m2, pct=pct, z=z,
             significant=significant, note=note,
         ))
+    return out
+
+
+# --- quality significance ------------------------------------------------
+
+# Ignore quality gaps smaller than this on the 0-1 scale (not worth testing).
+QUALITY_MIN_DELTA = 0.03
+
+
+@dataclass
+class QualityComparison:
+    category: str
+    leader: str
+    other: str
+    leader_mean: float
+    other_mean: float
+    z: float | None
+    significant: bool
+    note: str
+
+
+def _eff_quality(r: RequestResult) -> float | None:
+    """Judge score when the run was judged, else the objective check score."""
+    if r.judge_score is not None:
+        return r.judge_score
+    return r.quality
+
+
+def compare_quality(results: list[RequestResult]) -> list[QualityComparison]:
+    """Per category, compare the top two endpoints' quality and say whether the
+    gap is real or within run-to-run noise. Uses per-run effective-quality
+    values (judge where available, else objective checks)."""
+    by: dict[str, dict[str, list[float]]] = {}
+    for r in results:
+        if not r.ok or not r.category:
+            continue
+        q = _eff_quality(r)
+        if q is not None:
+            by.setdefault(r.category, {}).setdefault(r.endpoint, []).append(q)
+
+    out: list[QualityComparison] = []
+    for cat, eps in sorted(by.items()):
+        stats = {ep: vs for ep, vs in eps.items() if vs}
+        if len(stats) < 2:
+            continue
+        means = {ep: statistics.mean(vs) for ep, vs in stats.items()}
+        ordered = sorted(means, key=means.get, reverse=True)
+        top, second = ordered[0], ordered[1]
+        m1, m2 = means[top], means[second]
+        delta = m1 - m2
+
+        if delta < QUALITY_MIN_DELTA:
+            out.append(QualityComparison(
+                cat, top, second, m1, m2, 0.0, False,
+                f"{top} and {second} are tied ({m1:.2f} vs {m2:.2f})."))
+            continue
+
+        n1, n2 = len(stats[top]), len(stats[second])
+        z: float | None = None
+        significant = False
+        if n1 >= 2 and n2 >= 2:
+            s1 = statistics.stdev(stats[top])
+            s2 = statistics.stdev(stats[second])
+            se = math.sqrt(s1 ** 2 / n1 + s2 ** 2 / n2)
+            if se > 0:
+                z = delta / se
+                significant = z >= Z_SIGNIFICANT
+                note = (f"{top} leads {m1:.2f} vs {m2:.2f} — "
+                        + (f"significant (Δ/SE={z:.1f})." if significant
+                           else f"within noise (Δ/SE={z:.1f}); add repeats."))
+            else:
+                # No variance (e.g. all identical) but means differ: real given data.
+                z = float("inf")
+                significant = True
+                note = f"{top} leads {m1:.2f} vs {m2:.2f} — consistent (zero variance)."
+        else:
+            note = (f"{top} leads {m1:.2f} vs {m2:.2f}, but <2 samples — "
+                    f"can't test; raise `repeats`.")
+        out.append(QualityComparison(cat, top, second, m1, m2, z, significant, note))
     return out

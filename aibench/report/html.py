@@ -434,6 +434,42 @@ def _endpoints_html(endpoints: list[dict]) -> str:
     )
 
 
+def _quality_comparison_html(comparisons: list[Any]) -> str:
+    if not comparisons:
+        return ""
+    rows = []
+    for c in comparisons:
+        if c.significant:
+            verdict = "<b class='q-green'>significant</b>"
+        elif c.z == 0.0 and abs(c.leader_mean - c.other_mean) < 0.03:
+            verdict = "<b class='muted'>tied</b>"
+        elif c.z is not None:
+            verdict = "<b class='q-amber'>within noise</b>"
+        else:
+            verdict = "<b class='muted'>need repeats</b>"
+        zt = ("—" if c.z is None else ("∞" if c.z == float("inf") else f"{c.z:.1f}"))
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(c.category)}</td>"
+            f"<td><b>{html.escape(c.leader)}</b> {c.leader_mean:.2f}</td>"
+            f"<td>{html.escape(c.other)} {c.other_mean:.2f}</td>"
+            f"<td class='num'>{zt}</td>"
+            f"<td>{verdict}</td>"
+            "</tr>"
+        )
+    head = ("<tr><th>Category</th><th>Higher quality</th><th>vs</th>"
+            "<th>Δ/SE</th><th>verdict</th></tr>")
+    return (
+        "<h2>Head-to-head — quality significance</h2>"
+        "<div class='card'><p class='muted'>Compares the two highest-quality "
+        "endpoints per category (judge score where available, else objective "
+        "checks). A quality gap between the same model on different hardware is "
+        "expected to be noise — <b>within noise</b> confirms that. Δ/SE&ge;2 "
+        "means the gap is unlikely to be sampling variance.</p>"
+        f"<table>{head}{''.join(rows)}</table></div>"
+    )
+
+
 def _comparison_html(comparisons: list[Any], variance: list[Any]) -> str:
     if not comparisons:
         return ""
@@ -508,6 +544,7 @@ def render(
     profiles: list[Any] | None = None,
     categories: list[str] | None = None,
     fits: list[Any] | None = None,
+    quality_comparisons: list[Any] | None = None,
 ) -> Path:
     colors = _color_map(by_category or by_task)
     tps_chart = _grouped_bar_svg(
@@ -600,6 +637,8 @@ def render(
 <div class="card">{_table(by_category)}</div>
 
 {_comparison_html(comparisons or [], variance or [])}
+
+{_quality_comparison_html(quality_comparisons or [])}
 
 <h2>Per-task detail</h2>
 <div class="card">{_table(by_task)}{note}</div>
