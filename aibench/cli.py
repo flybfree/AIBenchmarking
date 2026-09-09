@@ -100,9 +100,11 @@ def _build_report(payload: dict, out_html: Path) -> Path:
     from .client import RequestResult
     from .diagnose import diagnose
     from .compare import compare_categories, variance_flags
+    from .scorecard import build_profiles, use_case_fit
     results = [RequestResult(**r) for r in payload["results"]]
     by_task = aggregate(results, group_key="task")
     by_cat = aggregate_by_category(results)
+    profiles, categories = build_profiles(by_cat)
     cfg = payload.get("config", {})
     meta = {
         "label": cfg.get("label", ""),
@@ -118,6 +120,8 @@ def _build_report(payload: dict, out_html: Path) -> Path:
         endpoints=cfg.get("endpoints", []),
         comparisons=compare_categories(by_cat),
         variance=variance_flags(by_cat),
+        profiles=profiles, categories=categories,
+        fits=use_case_fit(by_cat),
     )
 
 

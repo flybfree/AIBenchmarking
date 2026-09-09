@@ -32,6 +32,23 @@ python -m aibench run --config configs/example.yaml --judge
 
 Only tasks with a `rubric` are judged; see [judge.py](aibench/scoring/judge.py).
 
+### Scorecard — model strengths by use case
+
+The report includes a model-centric **Scorecard** ([scorecard.py](aibench/scorecard.py)):
+
+- **Use-case fit** — a recommended model per use case. It picks the best-quality
+  model, unless a faster one reaches comparable quality (within 0.05), then the
+  faster one wins — so "smaller/faster model, good-enough quality" is surfaced
+  automatically (e.g. *summarization → nemotron-4b: comparable quality at 37%
+  higher throughput*).
+- **Model × use-case matrix** — quality (judge score where available, else
+  objective checks) over throughput, per model per use case. Read across a row
+  for a model's strengths/weaknesses; down a column to compare models for one
+  use case.
+
+Since you run different models on different endpoints, this is the lens for
+assigning models to use cases across your fleet.
+
 ### Phase 2 quality scoring
 
 Each task carries deterministic, offline `checks` (see

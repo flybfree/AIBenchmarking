@@ -331,6 +331,62 @@ pre.answer.think { color:var(--think-fg); background:var(--think-bg); }
 """
 
 
+def _scorecard_html(profiles: list[Any], categories: list[str], fits: list[Any]) -> str:
+    if not profiles:
+        return ""
+
+    # Use-case fit recommendations.
+    fit_rows = "".join(
+        f"<tr><td><b>{html.escape(f.category)}</b></td>"
+        f"<td><b>{html.escape(f.pick_model)}</b> "
+        f"<span class='muted'>({html.escape(f.pick_endpoint)})</span></td>"
+        f"<td class='muted'>{html.escape(f.reason)}</td></tr>"
+        for f in fits
+    )
+    fit_table = (
+        "<h3>Use-case fit — recommended model per use case</h3>"
+        "<table><tr><th>Use case</th><th>Pick</th><th>Why</th></tr>"
+        f"{fit_rows}</table>"
+        "<p class='muted'>Picks the best-quality model, unless a faster one "
+        "reaches comparable quality (within 0.05) — then the faster one wins. "
+        "Quality is the LLM-judge score where available, else the objective checks.</p>"
+    )
+
+    # Model x use-case matrix: each cell = quality (colored) over tok/s.
+    head = "<tr><th>Model</th><th>Hardware</th>" + "".join(
+        f"<th>{html.escape(c)}</th>" for c in categories
+    ) + "</tr>"
+    rows = []
+    for p in profiles:
+        cells = []
+        for c in categories:
+            cell = p.cats.get(c)
+            if not cell or cell.quality is None:
+                cells.append("<td class='muted'>—</td>")
+                continue
+            qcls = _quality_class(cell.quality)
+            tps = f"{cell.tps:.0f} tok/s" if cell.tps else "—"
+            cells.append(
+                f"<td class='num'><b class='{qcls}'>{cell.quality:.2f}</b>"
+                f"<div class='pm'>{tps}</div></td>"
+            )
+        rows.append(
+            f"<tr><td><b>{html.escape(p.model)}</b></td>"
+            f"<td>{html.escape(p.hardware)}</td>{''.join(cells)}</tr>"
+        )
+    matrix = (
+        "<h3>Model &times; use-case matrix — quality (0&ndash;1) over throughput</h3>"
+        f"<table>{head}{''.join(rows)}</table>"
+        "<p class='muted'>Quality uses the judge score for creative/summarization "
+        "when judged, objective checks otherwise. Read across a row for a model's "
+        "strengths/weaknesses; down a column to compare models for one use case.</p>"
+    )
+
+    return ("<h2>Scorecard — model strengths by use case</h2>"
+            f"<div class='card'>{fit_table}</div>"
+            f"<div class='card'>{matrix}</div>")
+
+
 def _endpoints_html(endpoints: list[dict]) -> str:
     if not endpoints:
         return ""
@@ -431,6 +487,9 @@ def render(
     endpoints: list[dict] | None = None,
     comparisons: list[Any] | None = None,
     variance: list[Any] | None = None,
+    profiles: list[Any] | None = None,
+    categories: list[str] | None = None,
+    fits: list[Any] | None = None,
 ) -> Path:
     colors = _color_map(by_category or by_task)
     tps_chart = _grouped_bar_svg(
@@ -499,6 +558,8 @@ def render(
 <div class="card"><table>{meta_rows}</table></div>
 
 {_endpoints_html(endpoints or [])}
+
+{_scorecard_html(profiles or [], categories or [], fits or [])}
 
 {_diagnostics_html(diagnostics or [])}
 
