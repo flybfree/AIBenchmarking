@@ -588,6 +588,39 @@ REASONING = TaskSuite(
             "are even?",
             ["328"],  # last=0: 9*8=72; last in {2,4,6,8}: 8*8*4=256; total 328
         ),
+        # --- expert tier: deep multi-step chains meant to separate large models ---
+        _reason(
+            "reason_x_anagram", "hard",
+            "How many distinct arrangements of the letters of the word BALLOON "
+            "have no two identical letters adjacent (i.e. the two L's are not "
+            "next to each other and the two O's are not next to each other)?",
+            ["660"],  # 1260 - 360 - 360 + 120 (inclusion-exclusion)
+        ),
+        _reason(
+            "reason_x_crt", "hard",
+            "What is the smallest positive integer that is divisible by 7 and "
+            "leaves a remainder of 1 when divided by 5 and also a remainder of 1 "
+            "when divided by 6?",
+            ["91"],  # n=0 mod 7, 1 mod 30 -> 91
+        ),
+        _reason(
+            "reason_x_digits", "hard",
+            "A two-digit number is 36 greater than the number formed by reversing "
+            "its digits. The sum of its two digits is 10. What is the number?",
+            ["73"],  # 9(a-b)=36 -> a-b=4; a+b=10 -> 73
+        ),
+        _reason(
+            "reason_x_distribute", "hard",
+            "In how many ways can 10 identical candies be distributed among 4 "
+            "distinct children so that each child gets at least one candy?",
+            ["84"],  # C(9,3)
+        ),
+        _reason(
+            "reason_x_divisibility", "hard",
+            "How many integers from 1 to 1000 inclusive are divisible by 3 or by "
+            "5 but NOT by 15?",
+            ["401"],  # (333+200-66) - 66
+        ),
     ],
 )
 

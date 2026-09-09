@@ -96,7 +96,7 @@ Each task carries deterministic, offline `checks` (see
 [aibench/scoring/checks.py](aibench/scoring/checks.py)) that produce a quality
 score in `[0, 1]`:
 
-The suite spans **easy→hard** tasks per category (26 total, `list-tasks` shows
+The suite spans **easy→hard** tasks per category (37 total, `list-tasks` shows
 them) chosen to *discriminate* — weaker models fail the hard ones, so scores
 don't all pin at 1.0. Check types (see [checks.py](aibench/scoring/checks.py)):
 
