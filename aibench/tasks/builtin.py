@@ -9,6 +9,8 @@ acrostic) so they discriminate without a judge model.
 
 from __future__ import annotations
 
+import re
+
 from .base import Task, TaskSuite
 
 _ARTICLE = (
@@ -345,9 +347,142 @@ TOOL_USE = TaskSuite(
     ],
 )
 
+# --- multi-turn agents ----------------------------------------------------
+#
+# Tool implementations run between turns. Each takes the parsed argument dict
+# and returns a string the model sees as the tool result. The data is canned
+# so the correct final answer is deterministic and objectively checkable.
+
+_WEATHER_DATA = {"tokyo": 22, "london": 15, "cairo": 33}
+_CUSTOMERS = {"alice": "C7", "bob": "C3"}
+_ORDER_COUNTS = {"C7": 3, "C3": 8}
+_STOCK = {"AAPL": 187.50, "MSFT": 410.00}
+
+
+def _impl_weather(args: dict) -> str:
+    city = str(args.get("city", "")).strip().lower()
+    if city in _WEATHER_DATA:
+        return f"{_WEATHER_DATA[city]}°C"
+    return "unknown city"
+
+
+def _impl_find_customer(args: dict) -> str:
+    name = str(args.get("name", "")).strip().lower()
+    cid = _CUSTOMERS.get(name)
+    return cid if cid else "not found"
+
+
+def _impl_order_count(args: dict) -> str:
+    cid = str(args.get("customer_id", "")).strip()
+    n = _ORDER_COUNTS.get(cid)
+    return str(n) if n is not None else "unknown customer"
+
+
+def _impl_stock(args: dict) -> str:
+    t = str(args.get("ticker", "")).strip().upper()
+    return f"${_STOCK[t]:.2f}" if t in _STOCK else "unknown ticker"
+
+
+def _impl_calc(args: dict) -> str:
+    expr = str(args.get("expression", ""))
+    if not re.fullmatch(r"[0-9+\-*/(). ]+", expr):
+        return "Error: only arithmetic expressions are allowed"
+    try:
+        return str(eval(expr, {"__builtins__": {}}, {}))  # noqa: S307 (sanitized)
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def _weather_tool():
+    return {"type": "function", "function": {
+        "name": "get_weather", "description": "Current temperature for a city.",
+        "parameters": {"type": "object",
+                       "properties": {"city": {"type": "string"}},
+                       "required": ["city"]}}}
+
+
+AGENTS = TaskSuite(
+    name="agents",
+    description="Multi-turn tool loops: chain tool calls to reach a goal.",
+    tasks=[
+        Task(
+            id="agent_weather_compare", category="agents", difficulty="medium",
+            system="You are an agent with tools. Call tools as needed, then answer.",
+            prompt=("Compare the current weather in Tokyo and London. Which city "
+                    "is warmer, and by exactly how many degrees? State the number."),
+            params={"max_tokens": 400, "temperature": 0.0},
+            tools=[_weather_tool()],
+            tool_impls={"get_weather": _impl_weather},
+            max_turns=5,
+            checks=[
+                {"type": "tool_sequence", "names": ["get_weather"], "weight": 1},
+                {"type": "keyword_coverage", "weight": 2,
+                 "keywords": ["tokyo", "7"]},  # 22-15 = 7
+            ],
+        ),
+        Task(
+            id="agent_order_lookup", category="agents", difficulty="hard",
+            system="You are an agent with tools. Chain them as needed, then answer.",
+            prompt=("How many orders has the customer named Alice placed? "
+                    "Use the tools to look it up, then give the number."),
+            params={"max_tokens": 400, "temperature": 0.0},
+            tools=[
+                {"type": "function", "function": {
+                    "name": "find_customer",
+                    "description": "Look up a customer id by name.",
+                    "parameters": {"type": "object",
+                                   "properties": {"name": {"type": "string"}},
+                                   "required": ["name"]}}},
+                {"type": "function", "function": {
+                    "name": "get_order_count",
+                    "description": "Number of orders for a customer id.",
+                    "parameters": {"type": "object",
+                                   "properties": {"customer_id": {"type": "string"}},
+                                   "required": ["customer_id"]}}},
+            ],
+            tool_impls={"find_customer": _impl_find_customer,
+                        "get_order_count": _impl_order_count},
+            max_turns=6,
+            checks=[
+                {"type": "tool_sequence", "weight": 2,
+                 "names": ["find_customer", "get_order_count"]},
+                {"type": "keyword_coverage", "weight": 1, "keywords": ["3"]},
+            ],
+        ),
+        Task(
+            id="agent_stock_value", category="agents", difficulty="hard",
+            system="You are an agent with tools. Use them, then give the total.",
+            prompt=("I own 12 shares of AAPL. What is their total value in "
+                    "dollars? Use the tools and state the dollar amount."),
+            params={"max_tokens": 400, "temperature": 0.0},
+            tools=[
+                {"type": "function", "function": {
+                    "name": "get_stock_price",
+                    "description": "Latest price for a ticker.",
+                    "parameters": {"type": "object",
+                                   "properties": {"ticker": {"type": "string"}},
+                                   "required": ["ticker"]}}},
+                {"type": "function", "function": {
+                    "name": "calculate",
+                    "description": "Evaluate an arithmetic expression.",
+                    "parameters": {"type": "object",
+                                   "properties": {"expression": {"type": "string"}},
+                                   "required": ["expression"]}}},
+            ],
+            tool_impls={"get_stock_price": _impl_stock, "calculate": _impl_calc},
+            max_turns=6,
+            checks=[
+                {"type": "tool_sequence", "names": ["get_stock_price"], "weight": 1},
+                {"type": "keyword_coverage", "weight": 2,
+                 "keywords": [["2250", "2,250"]]},  # 12 * 187.50
+            ],
+        ),
+    ],
+)
+
 ALL_SUITES: dict[str, TaskSuite] = {
     s.name: s
-    for s in (CREATIVE_WRITING, CODE_GENERATION, SUMMARIZATION, TOOL_USE)
+    for s in (CREATIVE_WRITING, CODE_GENERATION, SUMMARIZATION, TOOL_USE, AGENTS)
 }
 
 

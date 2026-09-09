@@ -54,6 +54,7 @@ class RequestResult:
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     finish_reason: str | None = None
     error: str | None = None
+    turns: int = 1                         # >1 for multi-turn agent tasks
 
     # Phase 2 scoring (filled in by aibench.scoring.run.score_results).
     quality: float | None = None           # overall quality in [0, 1]
@@ -196,8 +197,10 @@ async def run_request(
                     for tc in delta.get("tool_calls", []) or []:
                         idx = tc.get("index", 0)
                         slot = tool_calls.setdefault(
-                            idx, {"name": "", "arguments": ""}
+                            idx, {"id": "", "name": "", "arguments": ""}
                         )
+                        if tc.get("id"):
+                            slot["id"] = tc["id"]
                         fn = tc.get("function", {}) or {}
                         if fn.get("name"):
                             slot["name"] = fn["name"]
@@ -222,7 +225,7 @@ async def run_request(
             result.text = "".join(text_parts)
             result.reasoning_text = "".join(reasoning_parts)
             result.tool_calls = [
-                {"name": v["name"], "arguments": v["arguments"]}
+                {"id": v.get("id", ""), "name": v["name"], "arguments": v["arguments"]}
                 for v in tool_calls.values()
             ]
 

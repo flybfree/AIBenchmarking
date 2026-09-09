@@ -23,7 +23,7 @@ Each task carries deterministic, offline `checks` (see
 [aibench/scoring/checks.py](aibench/scoring/checks.py)) that produce a quality
 score in `[0, 1]`:
 
-The suite spans **easy→hard** tasks per category (17 total, `list-tasks` shows
+The suite spans **easy→hard** tasks per category (20 total, `list-tasks` shows
 them) chosen to *discriminate* — weaker models fail the hard ones, so scores
 don't all pin at 1.0. Check types (see [checks.py](aibench/scoring/checks.py)):
 
@@ -33,7 +33,15 @@ don't all pin at 1.0. Check types (see [checks.py](aibench/scoring/checks.py)):
 | code (SQL) | `sql_sqlite` | Executes the query on a seeded in-memory SQLite DB; checks the top-5 order (catches a missing year filter) |
 | summarization | `bullets`, `sentence_count`, `keyword_coverage` | Format compliance + key-concept coverage (3-bullet, 1-sentence TL;DR, action-item extraction) |
 | tool use | `tool_call` | Correct tool, argument accuracy, tool *selection* among several, and *restraint* (not calling when unneeded) |
+| agents (multi-turn) | `tool_sequence` + `keyword_coverage` | Real tool loop — the harness executes tools between turns; scored on whether the model chained the right tools and reached the correct answer (see [agent.py](aibench/agent.py)) |
 | creative writing | `word_count`, `stanza_count`, `acrostic` | Objectively-checkable constraints (exact six-word story, acrostic spelling); subjective quality is Phase 3 |
+
+**Multi-turn agents:** the `agents` suite gives the model tools with real
+implementations (`tool_impls`). When the model calls a tool, the harness runs it,
+feeds the result back, and continues — up to `max_turns` — testing tool
+selection, chaining one tool's output into the next, and synthesising a final
+answer. Tasks include a weather comparison, a chained customer→order-count
+lookup, and a stock-value calculation.
 
 ### Trusting the numbers: variance & significance
 

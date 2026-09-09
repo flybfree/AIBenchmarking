@@ -238,8 +238,22 @@ def check_tool_call(task: Task, r: RequestResult, spec: dict) -> tuple[float, st
     )
 
 
+def check_tool_sequence(task: Task, r: RequestResult, spec: dict) -> tuple[float, str]:
+    """Multi-turn agent: did the model call the tools the task requires?
+    Order-insensitive — score is the fraction of expected tools that appear
+    among the calls made across all turns."""
+    expected = spec["names"]
+    called = {c.get("name") for c in (r.tool_calls or [])}
+    hits = sum(1 for n in expected if n in called)
+    return hits / len(expected), (
+        f"called {sorted(c for c in called if c)} — {hits}/{len(expected)} "
+        f"required tools ({r.turns} turn(s))"
+    )
+
+
 CHECKS: dict[str, Callable[[Task, RequestResult, dict], tuple[float, str]]] = {
     "python_func": check_python_func,
+    "tool_sequence": check_tool_sequence,
     "sql_sqlite": check_sql_sqlite,
     "bullets": check_bullets,
     "keyword_coverage": check_keyword_coverage,

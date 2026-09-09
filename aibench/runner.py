@@ -15,6 +15,7 @@ from typing import Callable
 
 import httpx
 
+from .agent import run_agent
 from .client import RequestResult, run_request
 from .config import Endpoint, RunConfig
 from .tasks import Task, resolve_suites
@@ -67,16 +68,21 @@ async def _run_endpoint(
 
             async def one(run_idx: int, is_warmup: bool) -> None:
                 async with sem:
-                    res = await run_request(
-                        client,
-                        endpoint,
-                        task.id,
-                        task.messages(),
-                        params,
-                        cfg.timeout_s,
-                        category=task.category,
-                        tools=task.tools,
-                    )
+                    if task.is_agent:
+                        res = await run_agent(
+                            client, endpoint, task, params, cfg.timeout_s,
+                        )
+                    else:
+                        res = await run_request(
+                            client,
+                            endpoint,
+                            task.id,
+                            task.messages(),
+                            params,
+                            cfg.timeout_s,
+                            category=task.category,
+                            tools=task.tools,
+                        )
                 tag = "warmup" if is_warmup else f"run {run_idx}"
                 if res.ok:
                     tps = f"{res.tokens_per_s:.1f} tok/s" if res.tokens_per_s else "ok"
