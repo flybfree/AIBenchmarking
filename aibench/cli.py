@@ -254,6 +254,37 @@ def _cmd_report(args) -> int:
     return 0
 
 
+def _cmd_leaderboard(args) -> int:
+    """Aggregate multiple result JSONs into a cross-model leaderboard."""
+    from .crossrun import load_runs, aggregate_by_model
+    from .report import render_crossrun
+
+    paths = args.results
+    if not paths:
+        paths = sorted(Path(args.dir).glob("*.json"))
+        if not paths:
+            out(f"No result JSONs found in {args.dir}/.")
+            return 1
+    loaded = load_runs(paths)
+    if not loaded.results:
+        out("No results loaded (unreadable or empty JSONs).")
+        return 1
+    rows, categories = aggregate_by_model(loaded.results)
+    out(f"Pooled {len(loaded.results)} results from {len(loaded.run_meta)} run(s) "
+        f"into {len(rows)} model/hardware unit(s).")
+    for r in rows:
+        out(f"  {r.model.split('/')[-1][:44]:44} @ {r.hardware:10} "
+            f"{len(r.runs)} run(s), {r.samples} samples")
+
+    out_html = Path(args.out) if args.out else Path(args.dir) / "leaderboard.html"
+    render_crossrun(rows, categories, loaded.run_meta, out_html)
+    out(f"\nLeaderboard -> {out_html}")
+    if args.open:
+        import webbrowser
+        webbrowser.open(Path(out_html).resolve().as_uri())
+    return 0
+
+
 def _cmd_score(args) -> int:
     """(Re)score a saved results JSON in place and rebuild its report."""
     from .scoring.run import score_results
@@ -361,6 +392,16 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--out", "-o")
     rp.add_argument("--open", action="store_true")
     rp.set_defaults(func=_cmd_report)
+
+    lb = sub.add_parser("leaderboard",
+                        help="Aggregate multiple runs into a cross-model leaderboard.")
+    lb.add_argument("results", nargs="*",
+                    help="Result JSON files (default: all in --dir).")
+    lb.add_argument("--dir", default="results",
+                    help="Directory to scan for result JSONs when none are listed.")
+    lb.add_argument("--out", "-o", help="Output HTML path (default: <dir>/leaderboard.html).")
+    lb.add_argument("--open", action="store_true")
+    lb.set_defaults(func=_cmd_leaderboard)
 
     sc = sub.add_parser("score", help="(Re)score a saved results JSON and rebuild its report.")
     sc.add_argument("results")
