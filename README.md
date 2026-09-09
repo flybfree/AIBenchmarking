@@ -122,6 +122,36 @@ python -m aibench score results/bakeoff_20260908_215646.json --open
 python -m pip install -r requirements.txt
 ```
 
+Or install as a package (gives you an `aibench` command instead of `python -m aibench`):
+
+```bash
+python -m pip install -e .
+```
+
+## Standalone executable
+
+Build a single self-contained binary — bundles the Python runtime and all
+dependencies, so the target machine needs no Python install:
+
+```bash
+python -m pip install -e ".[build]"   # installs PyInstaller
+python build_exe.py
+```
+
+This produces `dist/aibench` (`dist/aibench.exe` on Windows). Run it exactly
+like the CLI:
+
+```bash
+./dist/aibench run --config configs/example.yaml --judge
+./dist/aibench leaderboard
+```
+
+Notes:
+- Build **per-platform** — a Windows build runs on Windows, a Linux build on Linux.
+- The Phase 2 code check runs generated Python in a subprocess; the frozen exe
+  acts as its own Python runner (via an internal `__pyexec__` hook), so code
+  scoring works with no separate Python install on the target.
+
 ## Quick start
 
 1. Write a config (endpoints on your network):

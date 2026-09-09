@@ -4,3 +4,9 @@ results/*.json
 results/*.html
 .venv/
 venv/
+# PyInstaller / packaging build artifacts
+build/
+dist/
+*.spec
+*.egg-info/
+

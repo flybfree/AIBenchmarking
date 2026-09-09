@@ -64,10 +64,17 @@ def check_python_func(task: Task, r: RequestResult, spec: dict) -> tuple[float, 
     with tempfile.TemporaryDirectory() as d:
         script = Path(d) / "cand.py"
         script.write_text(driver, encoding="utf-8")
+        # In a normal install sys.executable is Python (run isolated: -I). In a
+        # PyInstaller build it's the aibench exe, which runs the script via its
+        # own `__pyexec__` self-exec hook (see cli.main). Either way the script
+        # runs in a separate process, so the timeout still bounds it.
+        if getattr(sys, "frozen", False):
+            cmd = [sys.executable, "__pyexec__", str(script), json.dumps(cases)]
+        else:
+            cmd = [sys.executable, "-I", str(script), json.dumps(cases)]
         try:
             proc = subprocess.run(
-                [sys.executable, "-I", str(script), json.dumps(cases)],
-                capture_output=True, text=True, timeout=timeout,
+                cmd, capture_output=True, text=True, timeout=timeout,
             )
         except subprocess.TimeoutExpired:
             return 0.0, f"execution timed out (> {timeout}s)"

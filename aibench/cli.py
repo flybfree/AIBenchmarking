@@ -429,7 +429,28 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _run_pyexec(script: str, extra: list[str]) -> int:
+    """Self-hosted Python runner for frozen builds.
+
+    In a PyInstaller exe, sys.executable is the aibench binary, not a Python
+    interpreter, so the code-scoring check re-invokes this exe with a sentinel
+    and we execute the candidate script here. The script reads its cases from
+    sys.argv[1], so we shape argv to match a plain `python script.py <cases>`."""
+    sys.argv = [script, *extra]
+    with open(script, encoding="utf-8") as f:
+        code = f.read()
+    g = {"__name__": "__main__", "__file__": script}
+    exec(compile(code, script, "exec"), g)  # noqa: S102 (sandboxed subprocess)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    # Frozen-exe self-exec hook: `aibench __pyexec__ <script> <args...>` runs the
+    # script instead of the CLI (used by the Phase 2 code checks). Must run
+    # before argparse. Only triggers on the exact sentinel, so normal CLI use is
+    # unaffected.
+    if argv is None and len(sys.argv) >= 3 and sys.argv[1] == "__pyexec__":
+        return _run_pyexec(sys.argv[2], sys.argv[3:])
     args = build_parser().parse_args(argv)
     return args.func(args)
 

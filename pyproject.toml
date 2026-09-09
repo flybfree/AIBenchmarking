@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aibench"
+version = "0.1.0"
+description = "Local AI inference benchmarking tool — compare local models and hardware across creative writing, code, summarization, and tool-use tasks."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+    "rich>=13.0",
+]
+
+[project.scripts]
+aibench = "aibench.cli:main"
+
+[project.optional-dependencies]
+build = ["pyinstaller>=6.0"]
+
+[tool.setuptools]
+packages = [
+    "aibench",
+    "aibench.tasks",
+    "aibench.scoring",
+    "aibench.report",
+]
