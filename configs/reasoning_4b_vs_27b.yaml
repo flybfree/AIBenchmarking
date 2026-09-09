@@ -1,0 +1,17 @@
+label: "reasoning-4b-vs-27b"
+repeats: 3
+warmup: 1
+timeout_s: 300
+concurrency: 4
+parallel_endpoints: true
+tasks:
+  - reasoning
+endpoints:
+  - name: "qwen-27b"
+    base_url: "http://192.168.3.89:1234/v1"
+    model: "qwen/qwen3.8-27b"
+    hardware: "RTX 5090"
+  - name: "nemotron-4b"
+    base_url: "http://192.168.3.181:1234/v1"
+    model: "nvidia/nemotron-3-nano-4b"
+    hardware: "RTX 4090"

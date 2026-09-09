@@ -547,6 +547,47 @@ REASONING = TaskSuite(
             "owns the dog. Which pet does Blue own?",
             ["cat"],  # Red=fish, Green=dog => Blue=cat
         ),
+        # --- hard tier: a 4B should miss these, a 27B should get them ---
+        _reason(
+            "reason_hard_fractions", "hard",
+            "A bakery makes 120 cookies. It sells 3/8 of them in the morning and "
+            "40% of the remaining cookies in the afternoon. How many cookies are "
+            "left at the end of the day?",
+            ["45"],  # 120*3/8=45 sold; 75 left; 40% of 75=30; 75-30=45
+        ),
+        _reason(
+            "reason_hard_algebra", "hard",
+            "A water tank is 1/4 full. After adding 15 litres it is 2/3 full. "
+            "What is the tank's total capacity in litres?",
+            ["36"],  # (2/3 - 1/4) C = 15 -> (5/12) C = 15 -> C = 36
+        ),
+        _reason(
+            "reason_hard_age", "hard",
+            "A father is 4 times as old as his son. In 20 years, the father will "
+            "be twice as old as the son. How old is the son now?",
+            ["10"],  # 4s+20 = 2(s+20) -> 2s=20 -> s=10
+        ),
+        _reason(
+            "reason_hard_ordering", "hard",
+            "Five runners finished a race. Carol finished before Dan but after "
+            "Eve. Alice finished last. Bob finished before Eve. Who finished "
+            "first?",
+            ["Bob"],  # Bob < Eve < Carol < Dan, Alice last
+        ),
+        _reason(
+            "reason_hard_knights", "hard",
+            "On an island, knights always tell the truth and knaves always lie. "
+            "You meet two people, A and B. A says: \"B is a knave.\" B says: "
+            "\"We are both knights.\" Is B a knight or a knave? Answer with one "
+            "word.",
+            ["knave"],  # A=knight, B=knave is the only consistent assignment
+        ),
+        _reason(
+            "reason_hard_counting", "hard",
+            "How many 3-digit numbers (100 to 999) have all distinct digits and "
+            "are even?",
+            ["328"],  # last=0: 9*8=72; last in {2,4,6,8}: 8*8*4=256; total 328
+        ),
     ],
 )
 
