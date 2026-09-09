@@ -101,6 +101,38 @@ async def _judge_one(
     return (score - 1) / 4.0, f"{score}/5 - {reason}"
 
 
+async def preflight(judge: Endpoint, timeout_s: float = 30.0) -> tuple[bool, str]:
+    """Validate the judge endpoint (reachable, authorized, model exists, returns
+    a parseable score) with one tiny call, so a misconfigured judge fails fast
+    instead of after a full benchmark."""
+    payload = {
+        "model": judge.model,
+        "messages": [{"role": "user",
+                      "content": 'Reply with only this JSON: {"score": 5, "reason": "ok"}'}],
+        "stream": False, "temperature": 0.0, "max_tokens": 64,
+    }
+    headers = {"Content-Type": "application/json"}
+    key = judge.resolved_key
+    if key and key != "not-needed":
+        headers["Authorization"] = f"Bearer {key}"
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(judge.chat_url, json=payload, headers=headers,
+                                  timeout=timeout_s)
+    except httpx.HTTPError as e:
+        return False, f"cannot reach judge: {type(e).__name__}: {e}"
+    if r.status_code != 200:
+        return False, f"HTTP {r.status_code}: {r.text[:200].strip()}"
+    try:
+        content = r.json()["choices"][0]["message"].get("content") or ""
+    except (KeyError, ValueError, IndexError):
+        return False, f"unexpected response shape: {r.text[:200].strip()}"
+    score, _ = parse_score(content)
+    if score is None:
+        return False, f"judge did not return a parseable score: {content[:120]!r}"
+    return True, f"OK (test score {score}/5)"
+
+
 async def judge_results(
     results: list[RequestResult], judge: Endpoint,
     timeout_s: float = 120.0, concurrency: int = 4,

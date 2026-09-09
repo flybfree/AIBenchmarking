@@ -192,6 +192,17 @@ def _cmd_run(args) -> int:
         cfg.repeats = args.repeats
     if args.parallel_endpoints is not None:
         cfg.parallel_endpoints = args.parallel_endpoints
+    # Fail fast on a misconfigured judge before running the whole benchmark.
+    if cfg.judge and not args.no_judge:
+        from .scoring.judge import preflight
+        ok, msg = asyncio.run(preflight(cfg.judge, timeout_s=min(cfg.timeout_s, 60)))
+        if not ok:
+            out(f"Judge preflight FAILED: {msg}")
+            out("Fix the judge model/key (e.g. OPENAI_API_KEY) and retry, "
+                "or pass --no-judge to run without judging.")
+            return 1
+        out(f"Judge preflight: {msg}")
+
     out(f"Running benchmark: {len(cfg.endpoints)} endpoint(s), "
         f"tasks={cfg.tasks}, repeats={cfg.repeats}\n")
 
