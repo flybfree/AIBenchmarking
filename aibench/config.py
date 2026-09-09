@@ -47,6 +47,7 @@ class RunConfig:
     warmup: int = 1                        # discarded warmup runs (model load, cache)
     timeout_s: float = 300.0               # per-request timeout
     concurrency: int = 1                   # concurrent requests per endpoint
+    parallel_endpoints: bool = False       # run endpoints at once (separate machines only)
     max_tokens: int | None = None          # answer budget; falls back to task default
     reasoning_reserve: int = 8192          # extra tokens added for thinking room
     #   (heavy reasoners can spend 4k+ tokens thinking before the answer)

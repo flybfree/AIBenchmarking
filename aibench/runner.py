@@ -115,9 +115,22 @@ async def run(cfg: RunConfig, progress: ProgressCb = print) -> RunOutput:
         config=cfg,
         started_at=datetime.now(timezone.utc).isoformat(),
     )
-    for endpoint in cfg.endpoints:
-        progress(f"[endpoint] {endpoint.name} ({endpoint.model} @ {endpoint.base_url})")
-        res = await _run_endpoint(cfg, endpoint, tasks, progress)
-        out.results.extend(res)
+    if cfg.parallel_endpoints and len(cfg.endpoints) > 1:
+        # Safe (and ~Nx faster) only when endpoints are SEPARATE machines;
+        # parallelising endpoints that share a GPU would make them compete and
+        # skew timings.
+        progress(f"[running {len(cfg.endpoints)} endpoints in parallel]")
+        for e in cfg.endpoints:
+            progress(f"[endpoint] {e.name} ({e.model} @ {e.base_url})")
+        results = await asyncio.gather(
+            *(_run_endpoint(cfg, e, tasks, progress) for e in cfg.endpoints)
+        )
+        for res in results:
+            out.results.extend(res)
+    else:
+        for endpoint in cfg.endpoints:
+            progress(f"[endpoint] {endpoint.name} ({endpoint.model} @ {endpoint.base_url})")
+            res = await _run_endpoint(cfg, endpoint, tasks, progress)
+            out.results.extend(res)
     out.finished_at = datetime.now(timezone.utc).isoformat()
     return out

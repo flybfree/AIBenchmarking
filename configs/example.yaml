@@ -4,6 +4,7 @@ repeats: 3          # measured runs per (endpoint, task)
 warmup: 1           # discarded warmup runs
 timeout_s: 300
 concurrency: 4      # >1 measures throughput under concurrent load
+parallel_endpoints: true   # OK here: Prism and Area-51 are separate machines
 # max_tokens: 512   # optional global cap (overrides per-task defaults)
 
 tasks:

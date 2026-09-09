@@ -167,6 +167,8 @@ def _cmd_run(args) -> int:
         cfg.reasoning_reserve = args.reasoning_reserve
     if args.repeats is not None:
         cfg.repeats = args.repeats
+    if args.parallel_endpoints is not None:
+        cfg.parallel_endpoints = args.parallel_endpoints
     out(f"Running benchmark: {len(cfg.endpoints)} endpoint(s), "
         f"tasks={cfg.tasks}, repeats={cfg.repeats}\n")
 
@@ -295,6 +297,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Extra output tokens added on top of the answer budget "
                         "so reasoning models have room to think (default 8192).")
     r.add_argument("--repeats", type=int, help="Override measured runs per task.")
+    r.add_argument("--parallel-endpoints", dest="parallel_endpoints",
+                   action="store_true", default=None,
+                   help="Benchmark all endpoints at once. Only for endpoints on "
+                        "SEPARATE machines (shared-GPU endpoints would skew timings).")
     r.add_argument("--no-score", action="store_true",
                    help="Skip Phase 2 reference-based quality scoring.")
     r.add_argument("--open", action="store_true", help="Open the HTML report when done.")
