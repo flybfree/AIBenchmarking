@@ -1,0 +1,23 @@
+# aibench run configuration
+label: "bakeoff"
+repeats: 3          # measured runs per (endpoint, task)
+warmup: 1           # discarded warmup runs
+timeout_s: 300
+concurrency: 4      # >1 measures throughput under concurrent load
+# max_tokens: 512   # optional global cap (overrides per-task defaults)
+
+tasks:
+  - all             # or: creative_writing, code_generation, summarization, tool_use
+
+endpoints:
+  - name: "Prism"
+    base_url: "http://192.168.3.89:1234/v1"     # LM Studio example
+    model: "davidau/qwen3.8-27b-turbo-fable-cold-fusion-735-882-heretic-uncensored-neo-coder-max-mtp-gguf/qwen3.8-27b-turbofcfusion-735-882-here-uncen-neo-coder-max-mtp-q4_k_s.gguf"
+    hardware: "RTX 5090"
+    
+  - name: "Area-51"
+    base_url: "http://192.168.3.181:1234/v1"   # LM Studio 
+    model: "nvidia/nemotron-3-nano-4b"
+    hardware: "RTX 4090"
+
+  
