@@ -148,6 +148,41 @@ def check_sql_sqlite(task: Task, r: RequestResult, spec: dict) -> tuple[float, s
 
 # --- text / format checks -------------------------------------------------
 
+def check_answer_match(task: Task, r: RequestResult, spec: dict) -> tuple[float, str]:
+    """For reasoning tasks: is the correct final answer present? `answers` lists
+    acceptable answer strings (bare values, no '$'). Matching is word-boundary
+    (so "8" won't match inside "18") and comma-insensitive (2,250 == 2250). The
+    final line(s) score full credit; the answer merely appearing somewhere in
+    the working scores partial (reasoned to it but didn't state it clearly)."""
+    answers = spec["answers"]
+    text = re.sub(r"(?<=\d),(?=\d)", "", r.text or "")   # drop thousands commas
+
+    def found(region: str) -> bool:
+        low = region.lower()
+        for a in answers:
+            aa = re.sub(r"(?<=\d),(?=\d)", "", str(a)).strip().lstrip("$").lower()
+            if aa and re.search(r"(?<!\w)" + re.escape(aa) + r"(?!\w)", low):
+                return True
+        return False
+
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    # Prefer an explicit "Answer: X" / "final answer: X" line (the last one). If
+    # present, score strictly on it — a stated wrong answer is wrong even if the
+    # right value appears in the working.
+    for ln in reversed(lines):
+        m = re.search(r"(?:final\s+answer|answer)\s*[:=\-]\s*(.+)", ln, re.I)
+        if m:
+            if found(m.group(1)):
+                return 1.0, f"answer '{answers[0]}' stated as the final answer"
+            return 0.0, f"stated a different final answer than '{answers[0]}'"
+    # No explicit marker: the last line is the answer by convention.
+    if lines and found(lines[-1]):
+        return 1.0, f"answer '{answers[0]}' on the final line"
+    if found(text):
+        return 0.6, f"answer '{answers[0]}' present but not stated as the final answer"
+    return 0.0, f"expected answer '{answers[0]}' not found"
+
+
 _BULLET = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+\S")
 
 
@@ -261,6 +296,7 @@ def check_tool_sequence(task: Task, r: RequestResult, spec: dict) -> tuple[float
 CHECKS: dict[str, Callable[[Task, RequestResult, dict], tuple[float, str]]] = {
     "python_func": check_python_func,
     "tool_sequence": check_tool_sequence,
+    "answer_match": check_answer_match,
     "sql_sqlite": check_sql_sqlite,
     "bullets": check_bullets,
     "keyword_coverage": check_keyword_coverage,

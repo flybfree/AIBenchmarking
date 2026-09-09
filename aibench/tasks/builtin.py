@@ -491,9 +491,69 @@ AGENTS = TaskSuite(
     ],
 )
 
+# --- reasoning -------------------------------------------------------------
+#
+# Multi-step problems with a single objectively-correct answer (math, logic,
+# deduction). Scored by whether the correct final answer appears (word-boundary
+# matched). Prompts ask for the answer on the last line so it's unambiguous.
+
+def _reason(id, difficulty, prompt, answers):
+    return Task(
+        id=id, category="reasoning", difficulty=difficulty,
+        system="Think step by step. Put the final answer on the last line.",
+        prompt=prompt + "\n\nShow your reasoning, then give the final answer on its own line.",
+        params={"max_tokens": 500, "temperature": 0.2},
+        checks=[{"type": "answer_match", "answers": answers}],
+    )
+
+
+REASONING = TaskSuite(
+    name="reasoning",
+    description="Multi-step math, logic and deduction with objectively-correct answers.",
+    tasks=[
+        _reason(
+            "reason_arithmetic", "easy",
+            "A store sells notebooks at 3 for $6. At that rate, how much do 10 "
+            "notebooks cost, in dollars?",
+            ["20"],  # $2 each x 10
+        ),
+        _reason(
+            "reason_word_problem", "medium",
+            "Tom has 3 boxes of 8 pencils. He gives 4 pencils to each of his 2 "
+            "sisters, then keeps the rest. How many pencils does Tom keep?",
+            ["16"],  # 24 - 8
+        ),
+        _reason(
+            "reason_sequence", "medium",
+            "What is the next number in the sequence 2, 6, 12, 20, 30, ...?",
+            ["42"],  # differences 4,6,8,10,12
+        ),
+        _reason(
+            "reason_logic_order", "medium",
+            "Anna is older than Ben. Ben is older than Cara. Dana is younger "
+            "than Cara. Who is the oldest?",
+            ["Anna"],
+        ),
+        _reason(
+            "reason_rate", "hard",
+            "A train travels 60 miles in 1.5 hours. At the same constant speed, "
+            "how many miles does it travel in 4 hours?",
+            ["160"],  # 40 mph x 4
+        ),
+        _reason(
+            "reason_deduction", "hard",
+            "Three friends — Red, Green, and Blue — each own a different pet: a "
+            "cat, a dog, or a fish. Red owns neither the cat nor the dog. Green "
+            "owns the dog. Which pet does Blue own?",
+            ["cat"],  # Red=fish, Green=dog => Blue=cat
+        ),
+    ],
+)
+
 ALL_SUITES: dict[str, TaskSuite] = {
     s.name: s
-    for s in (CREATIVE_WRITING, CODE_GENERATION, SUMMARIZATION, TOOL_USE, AGENTS)
+    for s in (CREATIVE_WRITING, CODE_GENERATION, SUMMARIZATION, TOOL_USE,
+              AGENTS, REASONING)
 }
 
 
