@@ -184,9 +184,18 @@ def _render_sample(r: Any, label: str) -> str:
     q_txt = ""
     if quality is not None:
         q_txt = f" · <b class='{_quality_class(quality)}'>quality {quality:.2f}</b>"
+    judge = getattr(r, "judge_score", None)
+    j_txt = ""
+    if judge is not None:
+        j_txt = f" · <b class='{_quality_class(judge)}'>judge {judge:.2f}</b>"
     note = getattr(r, "score_note", "") or ""
     note_txt = (
         f"<div class='scorenote muted'>{html.escape(note)}</div>" if note else ""
+    )
+    jnote = getattr(r, "judge_note", "") or ""
+    jnote_txt = (
+        f"<div class='scorenote judgenote'>&#9878; judge: {html.escape(jnote)}</div>"
+        if jnote else ""
     )
 
     body_parts = []
@@ -209,7 +218,7 @@ def _render_sample(r: Any, label: str) -> str:
 
     return (
         f"<div class='sample'><div class='shead muted'>{html.escape(label)}"
-        f" · {tps_txt}{q_txt}{flags_txt}</div>{note_txt}"
+        f" · {tps_txt}{q_txt}{j_txt}{flags_txt}</div>{note_txt}{jnote_txt}"
         f"{''.join(body_parts)}</div>"
     )
 
@@ -319,7 +328,8 @@ pre.answer.think { color:var(--think-fg); background:var(--think-bg); }
 .sample + .sample { border-top:1px dashed var(--hair); padding-top:10px; }
 .shead { font-size:11.5px; margin-bottom:6px; font-variant-numeric:tabular-nums; }
 .sflag, .q-red { color:var(--red); }
-.scorenote { font-size:11px; margin:-2px 0 8px; }
+.scorenote { font-size:11px; margin:-2px 0 8px; color:var(--muted); }
+.judgenote { border-left:2px solid var(--amber); padding-left:6px; color:var(--fg); font-style:italic; }
 .q-green { color:var(--green); }
 .q-amber { color:var(--amber); }
 .think > summary { cursor:pointer; font-size:12px; color:var(--muted); margin-top:8px; }
