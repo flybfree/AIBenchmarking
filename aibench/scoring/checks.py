@@ -155,7 +155,9 @@ def check_answer_match(task: Task, r: RequestResult, spec: dict) -> tuple[float,
     final line(s) score full credit; the answer merely appearing somewhere in
     the working scores partial (reasoned to it but didn't state it clearly)."""
     answers = spec["answers"]
-    text = re.sub(r"(?<=\d),(?=\d)", "", r.text or "")   # drop thousands commas
+    # Normalize: drop thousands commas, strip markdown emphasis (**bold**, `code`, # ).
+    text = re.sub(r"(?<=\d),(?=\d)", "", r.text or "")
+    text = re.sub(r"[*`#]", "", text)
 
     def found(region: str) -> bool:
         low = region.lower()
@@ -166,18 +168,20 @@ def check_answer_match(task: Task, r: RequestResult, spec: dict) -> tuple[float,
         return False
 
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    # Prefer an explicit "Answer: X" / "final answer: X" line (the last one). If
-    # present, score strictly on it — a stated wrong answer is wrong even if the
-    # right value appears in the working.
-    for ln in reversed(lines):
-        m = re.search(r"(?:final\s+answer|answer)\s*[:=\-]\s*(.+)", ln, re.I)
-        if m:
-            if found(m.group(1)):
-                return 1.0, f"answer '{answers[0]}' stated as the final answer"
-            return 0.0, f"stated a different final answer than '{answers[0]}'"
-    # No explicit marker: the last line is the answer by convention.
+    # 1) The last line is the answer by convention (handles "…\n160", "…\ncat",
+    #    and "Final Answer:\n160" where the value is on its own line).
     if lines and found(lines[-1]):
         return 1.0, f"answer '{answers[0]}' on the final line"
+    # 2) Explicit final-answer marker: score strictly on the marker line plus
+    #    everything after it, so a stated wrong answer is wrong even if the right
+    #    value appears earlier in the working.
+    for i in range(len(lines) - 1, -1, -1):
+        if re.search(r"final\s+answer|answer\s*[:=]", lines[i], re.I):
+            region = " ".join(lines[i:])
+            if found(region):
+                return 1.0, f"answer '{answers[0]}' stated as the final answer"
+            return 0.0, f"stated a different final answer than '{answers[0]}'"
+    # 3) Present somewhere in the working but never stated as the answer.
     if found(text):
         return 0.6, f"answer '{answers[0]}' present but not stated as the final answer"
     return 0.0, f"expected answer '{answers[0]}' not found"
