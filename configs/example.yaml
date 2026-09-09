@@ -10,12 +10,14 @@ parallel_endpoints: true   # OK here: Prism and Area-51 are separate machines
 tasks:
   - all             # creative_writing, code_generation, summarization, tool_use, agents
 
-# Phase 3 LLM-judge (optional): graduated 1-5 rubric quality for subjective tasks.
-# Point it at a strong model (ideally not one under test). Enable with --judge.
-# judge:
-#   name: "judge"
-#   base_url: "http://192.168.3.89:1234/v1"
-#   model: "davidau/qwen3.8-27b-turbo-fable-cold-fusion-735-882-heretic-uncensored-neo-coder-max-mtp-gguf/qwen3.8-27b-turbofcfusion-735-882-here-uncen-neo-coder-max-mtp-q4_k_s.gguf"
+# Phase 3 LLM-judge: impartial external judge (OpenAI). Not one of the models
+# under test, so no self-judging bias. Key comes from the OPENAI_API_KEY env var
+# (never stored here). Note: this sends model outputs + task prompts to OpenAI.
+judge:
+  name: "judge"
+  base_url: "https://api.openai.com/v1"
+  model: "gpt-5.6-luna"
+  api_key: "env:OPENAI_API_KEY"
 
 endpoints:
   - name: "Prism"
@@ -25,7 +27,7 @@ endpoints:
     
   - name: "Area-51"
     base_url: "http://192.168.3.181:1234/v1"   # LM Studio 
-    model: "nvidia/nemotron-3-nano-4b"
+    model: "huihui-gemma-4-e4b-it-qat-unquantized-abliterated"
     hardware: "RTX 4090"
 
   
