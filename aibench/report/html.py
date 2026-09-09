@@ -109,9 +109,16 @@ def _table(aggs: list[Aggregate]) -> str:
     head = (
         "<tr><th>Endpoint</th><th>Hardware</th><th>Model</th><th>Task/Group</th>"
         "<th>tok/s (mean)</th><th>tok/s (median)</th><th>TTFT ms (mean)</th>"
-        "<th>TTFT ms p95</th><th>total s</th><th>out tok</th>"
+        "<th>TTFT ms p95</th><th>spikes</th><th>total s</th><th>out tok</th>"
         "<th>quality</th><th>judge</th><th>ok/n</th><th>notes</th></tr>"
     )
+
+    def spikes(a) -> str:
+        if a.ttft_spike_rate is None:
+            return "<span class='muted'>—</span>"
+        pct = a.ttft_spike_rate * 100
+        cls = "sflag" if a.ttft_spike_rate > 0.15 else "muted"
+        return f"<span class='{cls}'>{pct:.0f}%</span>"
 
     def cell(v, fmt="{:.1f}"):
         return fmt.format(v) if v is not None else "—"
@@ -147,6 +154,7 @@ def _table(aggs: list[Aggregate]) -> str:
             f"<td class='num'>{cell(a.tokens_per_s_median)}</td>"
             f"<td class='num'>{cell(a.ttft_ms_mean)}</td>"
             f"<td class='num'>{cell(a.ttft_ms_p95)}</td>"
+            f"<td class='num'>{spikes(a)}</td>"
             f"<td class='num'>{cell(a.total_s_mean, '{:.2f}')}</td>"
             f"<td class='num'>{cell(a.completion_tokens_mean, '{:.0f}')}</td>"
             f"<td class='num'>{_quality_cell(a)}</td>"
@@ -526,6 +534,13 @@ def render(
         for k, v in meta.items()
     )
     note_bits = []
+    if any((a.ttft_spike_rate or 0) > 0 for a in by_task):
+        note_bits.append(
+            "<b>spikes</b>: fraction of runs whose time-to-first-token was an "
+            "outlier (&gt;3x the median and &gt;250 ms) — usually inference-server "
+            "jitter, not steady-state latency. Read TTFT as the median/mean; a "
+            "high spike rate means the mean is inflated by a few slow first tokens."
+        )
     if any(a.tokens_estimated for a in by_task):
         note_bits.append(
             "* token count estimated from streamed chunks (server did not "

@@ -163,13 +163,16 @@ def _print_comparison(by_cat) -> None:
 def _print_summary(by_cat) -> None:
     if _console:
         table = Table(title="Per-category summary")
-        for col in ("Endpoint", "Hardware", "Category", "tok/s", "TTFT ms", "quality", "ok/n"):
-            table.add_column(col, justify="right" if col in ("tok/s", "TTFT ms", "quality") else "left")
+        num_cols = ("tok/s", "TTFT ms", "p95", "spikes", "quality")
+        for col in ("Endpoint", "Hardware", "Category", "tok/s", "TTFT ms", "p95", "spikes", "quality", "ok/n"):
+            table.add_column(col, justify="right" if col in num_cols else "left")
         for a in by_cat:
             table.add_row(
                 a.endpoint, a.hardware, a.group,
                 f"{a.tokens_per_s_mean:.1f}" if a.tokens_per_s_mean else "—",
                 f"{a.ttft_ms_mean:.0f}" if a.ttft_ms_mean else "—",
+                f"{a.ttft_ms_p95:.0f}" if a.ttft_ms_p95 else "—",
+                f"{a.ttft_spike_rate*100:.0f}%" if a.ttft_spike_rate is not None else "—",
                 f"{a.quality_mean:.2f}" if a.quality_mean is not None else "—",
                 f"{a.n_ok}/{a.n}",
             )

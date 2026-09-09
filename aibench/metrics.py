@@ -28,6 +28,22 @@ def _pct(values: list[float], p: float) -> float | None:
     return vals[lo] + (vals[hi] - vals[lo]) * (k - lo)
 
 
+# A TTFT counts as a "spike" when it exceeds both an absolute floor and this
+# multiple of the group's median — i.e. an outlier well above typical latency
+# (usually inference-server jitter, not steady-state behaviour).
+_SPIKE_FACTOR = 3.0
+_SPIKE_FLOOR_MS = 250.0
+
+
+def _spike_rate(ttft_ms: list[float]) -> float | None:
+    vals = [v for v in ttft_ms if v is not None]
+    if len(vals) < 2:
+        return None
+    med = statistics.median(vals)
+    thresh = max(_SPIKE_FLOOR_MS, _SPIKE_FACTOR * med)
+    return sum(1 for v in vals if v > thresh) / len(vals)
+
+
 @dataclass
 class Aggregate:
     """Summary statistics over repeated runs of one (endpoint, group)."""
@@ -45,6 +61,7 @@ class Aggregate:
     tokens_per_s_n: int = 0                   # samples behind the tok/s stats
     ttft_ms_mean: float | None = None
     ttft_ms_p95: float | None = None
+    ttft_spike_rate: float | None = None   # fraction of runs with TTFT >> median
     total_s_mean: float | None = None
     completion_tokens_mean: float | None = None
     tokens_estimated: bool = False
@@ -99,6 +116,7 @@ def aggregate(
             tokens_per_s_n=len([v for v in tps if v is not None]),
             ttft_ms_mean=_stat(ttft, statistics.mean),
             ttft_ms_p95=_pct(ttft, 0.95),
+            ttft_spike_rate=_spike_rate(ttft),
             total_s_mean=_stat([r.total_s for r in ok], statistics.mean),
             completion_tokens_mean=_stat(
                 [float(r.completion_tokens) for r in ok if r.completion_tokens],
