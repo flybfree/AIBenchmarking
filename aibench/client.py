@@ -125,8 +125,9 @@ async def run_request(
         payload["tools"] = tools
 
     headers = {"Content-Type": "application/json"}
-    if endpoint.api_key and endpoint.api_key != "not-needed":
-        headers["Authorization"] = f"Bearer {endpoint.api_key}"
+    key = endpoint.resolved_key
+    if key and key != "not-needed":
+        headers["Authorization"] = f"Bearer {key}"
 
     # Record the user prompt so reports are self-describing.
     result.prompt = next(

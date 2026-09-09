@@ -57,10 +57,21 @@ tasks:
 # Optional Phase 3 LLM-judge: scores subjective tasks (creative, summaries) on a
 # 1-5 rubric so quality actually separates models. Point it at a strong model;
 # it need not be one of the endpoints under test. Enable at runtime with --judge.
+#
+# Local judge (no key):
 # judge:
 #   name: "judge"
 #   base_url: "http://192.168.3.89:1234/v1"
 #   model: "some-strong-model"
+#
+# External provider (any OpenAI-compatible API). Put the key in an ENV VAR, not
+# here — `env:NAME` is read from the environment at runtime. NOTE: this sends the
+# models' outputs (and task prompts, incl. the source articles) to that provider.
+# judge:
+#   name: "judge"
+#   base_url: "https://api.openai.com/v1"      # or https://openrouter.ai/api/v1, etc.
+#   model: "gpt-4o-mini"
+#   api_key: "env:OPENAI_API_KEY"              # set OPENAI_API_KEY in your shell
 
 endpoints:
   - name: "rig1-llama3-8b"
@@ -285,8 +296,8 @@ def _cmd_ping(args) -> int:
                     "stream": False,
                 }
                 headers = {"Content-Type": "application/json"}
-                if ep.api_key and ep.api_key != "not-needed":
-                    headers["Authorization"] = f"Bearer {ep.api_key}"
+                if ep.resolved_key and ep.resolved_key != "not-needed":
+                    headers["Authorization"] = f"Bearer {ep.resolved_key}"
                 t0 = time.perf_counter()
                 try:
                     r = await client.post(url, json=body, headers=headers, timeout=15)

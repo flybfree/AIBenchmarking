@@ -32,6 +32,29 @@ python -m aibench run --config configs/example.yaml --judge
 
 Only tasks with a `rubric` are judged; see [judge.py](aibench/scoring/judge.py).
 
+**Using an external provider as judge.** The judge is any OpenAI-compatible API,
+so you can use a hosted model (OpenAI, OpenRouter, Groq, Together, …). Keep the
+key out of the config file — write `api_key: "env:NAME"` and it's read from that
+environment variable at runtime (`env:NAME`, `${NAME}` and `$NAME` all work):
+
+```yaml
+judge:
+  name: "judge"
+  base_url: "https://api.openai.com/v1"   # or https://openrouter.ai/api/v1, etc.
+  model: "gpt-4o-mini"
+  api_key: "env:OPENAI_API_KEY"
+```
+
+```bash
+# set the key in your shell (PowerShell), then run
+$env:OPENAI_API_KEY = "sk-..."
+python -m aibench run --config configs/example.yaml --judge
+```
+
+> A hosted judge is the most impartial option (it isn't one of the models under
+> test), but it **sends the models' outputs and the task prompts — including the
+> source articles — to that provider**. Use a local judge if that's a concern.
+
 ### Scorecard — model strengths by use case
 
 The report includes a model-centric **Scorecard** ([scorecard.py](aibench/scorecard.py)):

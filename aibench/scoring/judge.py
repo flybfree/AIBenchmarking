@@ -83,8 +83,9 @@ async def _judge_one(
     }
     payload.update(judge.params)
     headers = {"Content-Type": "application/json"}
-    if judge.api_key and judge.api_key != "not-needed":
-        headers["Authorization"] = f"Bearer {judge.api_key}"
+    key = judge.resolved_key
+    if key and key != "not-needed":
+        headers["Authorization"] = f"Bearer {key}"
     try:
         r = await client.post(judge.chat_url, json=payload, headers=headers,
                               timeout=timeout_s)

@@ -8,6 +8,8 @@ and which task suites to run. Endpoints speak the OpenAI-compatible
 from __future__ import annotations
 
 import json
+import os
+import re
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any
@@ -35,6 +37,19 @@ class Endpoint:
     @property
     def chat_url(self) -> str:
         return self.base_url.rstrip("/") + "/chat/completions"
+
+    @property
+    def resolved_key(self) -> str:
+        """The API key to send. If api_key is written as `env:VAR`, `${VAR}` or
+        `$VAR`, the value is read from that environment variable at runtime so
+        the secret never lives in the config file. Otherwise it's used literally
+        ('not-needed' means send no Authorization header)."""
+        v = (self.api_key or "").strip()
+        m = re.fullmatch(r"env:(\w+)|\$\{(\w+)\}|\$(\w+)", v)
+        if m:
+            name = next(g for g in m.groups() if g)
+            return os.environ.get(name, "")
+        return v
 
 
 @dataclass
