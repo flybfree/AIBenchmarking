@@ -18,7 +18,7 @@ import statistics
 from dataclasses import dataclass
 
 from .client import RequestResult
-from .metrics import Aggregate
+from .metrics import Aggregate, SHORT_OUTPUT_TOKENS
 
 # z = |Δ| / SE above this => call the difference significant. ~2 is nominally
 # 95% for large n; we keep it here but caveat small-n in the wording.
@@ -38,6 +38,7 @@ class Comparison:
     z: float | None                # None when variance/counts unavailable
     significant: bool
     note: str
+    unreliable: bool = False       # outputs too short for tok/s to be comparable
 
 
 @dataclass
@@ -79,6 +80,19 @@ def compare_categories(by_category: list[Aggregate]) -> list[Comparison]:
         top, second = eps[0], eps[1]
         m1, m2 = top.tokens_per_s_mean, second.tokens_per_s_mean
         pct = 100 * (m1 - m2) / m2 if m2 else 0.0
+
+        # When either side's outputs are too short, tok/s is TTFT-dominated and
+        # not a fair throughput comparison — report it as such instead of a
+        # spurious "winner".
+        if getattr(top, "tps_unreliable", False) or getattr(second, "tps_unreliable", False):
+            out.append(Comparison(
+                category=cat, faster=top.endpoint, slower=second.endpoint,
+                faster_mean=m1, slower_mean=m2, pct=pct, z=None,
+                significant=False, unreliable=True,
+                note=(f"outputs too short (<{SHORT_OUTPUT_TOKENS} tok) for tok/s to be "
+                      f"meaningful — dominated by time-to-first-token; compare TTFT."),
+            ))
+            continue
 
         z: float | None = None
         significant = False

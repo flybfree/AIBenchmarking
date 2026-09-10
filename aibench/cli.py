@@ -154,6 +154,11 @@ def _print_comparison(by_cat) -> None:
         return
     out("\nHead-to-head throughput (fastest per category):")
     for c in comps:
+        if getattr(c, "unreliable", False):
+            out(f"  {c.category:16} {c.faster} {c.faster_mean:.1f} vs "
+                f"{c.slower} {c.slower_mean:.1f} tok/s  "
+                f"(n/a — outputs too short for reliable tok/s; compare TTFT)")
+            continue
         verdict = ("significant" if c.significant
                    else ("within noise" if c.z is not None else "need >=2 repeats"))
         z = f"Δ/SE={c.z:.1f}" if c.z is not None else ""
@@ -178,16 +183,23 @@ def _print_quality_comparison(results) -> None:
 def _print_summary(by_cat) -> None:
     if _console:
         table = Table(title="Per-category summary")
-        num_cols = ("tok/s", "TTFT ms", "p95", "spikes", "quality")
-        for col in ("Endpoint", "Hardware", "Category", "tok/s", "TTFT ms", "p95", "spikes", "quality", "ok/n"):
+        num_cols = ("tok/s", "TTFT ms", "p95", "spikes", "runaway", "quality")
+        for col in ("Endpoint", "Hardware", "Category", "tok/s", "TTFT ms", "p95", "spikes", "runaway", "quality", "ok/n"):
             table.add_column(col, justify="right" if col in num_cols else "left")
         for a in by_cat:
+            if a.tokens_per_s_mean is None:
+                tps = "—"
+            elif getattr(a, "tps_unreliable", False):
+                tps = f"~{a.tokens_per_s_mean:.1f}~"   # short output: TTFT-dominated
+            else:
+                tps = f"{a.tokens_per_s_mean:.1f}"
             table.add_row(
                 a.endpoint, a.hardware, a.group,
-                f"{a.tokens_per_s_mean:.1f}" if a.tokens_per_s_mean else "—",
+                tps,
                 f"{a.ttft_ms_mean:.0f}" if a.ttft_ms_mean else "—",
                 f"{a.ttft_ms_p95:.0f}" if a.ttft_ms_p95 else "—",
                 f"{a.ttft_spike_rate*100:.0f}%" if a.ttft_spike_rate is not None else "—",
+                f"{a.runaway_rate*100:.0f}%" if a.runaway_rate else "—",
                 f"{a.quality_mean:.2f}" if a.quality_mean is not None else "—",
                 f"{a.n_ok}/{a.n}",
             )
