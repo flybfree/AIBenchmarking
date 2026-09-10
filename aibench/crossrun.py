@@ -27,6 +27,7 @@ class Cell:
     tps: float | None = None
     tps_std: float | None = None
     n: int = 0                         # measured samples pooled
+    quality_excluded_runs: int = 0     # runs dropped from quality (truncated/broken)
 
 
 @dataclass
@@ -74,6 +75,24 @@ def load_runs(paths: list[str | Path]) -> LoadedRuns:
             "models": sorted({e.get("model", "") for e in cfg.get("endpoints", [])}),
         })
     return LoadedRuns(results, meta)
+
+
+# A run's cell is dropped from quality pooling when more than this fraction of
+# its responses were "broken" (empty + not a clean stop/length + tiny output) —
+# the signature of a truncation/format bug, distinct from a genuine overflow
+# (finish="length" at the full token budget), which stays counted as a real
+# failure.
+BROKEN_RUN_FRAC = 0.34
+
+
+def _is_broken(r: RequestResult) -> bool:
+    return (
+        r.ok
+        and not (r.text or "").strip()
+        and not r.tool_calls
+        and r.finish_reason not in ("stop", "length")
+        and (r.completion_tokens or 0) < 20
+    )
 
 
 def _mean(xs):
@@ -124,8 +143,22 @@ def aggregate_by_model(results: list[RequestResult]) -> tuple[list[ModelRow], li
             cat_rs = [r for r in unit_rs if r.category == cat]
             if not cat_rs:
                 continue
-            obj = _mean([r.quality for r in cat_rs if r.quality is not None])
-            jud = _mean([r.judge_score for r in cat_rs if r.judge_score is not None])
+            # Drop this category's contribution from any run that was mostly
+            # broken/truncated (a config/format bug), so it doesn't poison the
+            # pooled quality; a genuine overflow (finish="length") is kept.
+            by_run: dict[str, list[RequestResult]] = {}
+            for r in cat_rs:
+                by_run.setdefault(getattr(r, "run_label", "?"), []).append(r)
+            broken_runs = {
+                run for run, rr in by_run.items()
+                if len(rr) >= 2 and sum(_is_broken(r) for r in rr) / len(rr) > BROKEN_RUN_FRAC
+            }
+            q_rs = [r for r in cat_rs if getattr(r, "run_label", "?") not in broken_runs]
+            if not q_rs:                # every run broken — keep them, don't hide
+                q_rs, broken_runs = cat_rs, set()
+
+            obj = _mean([r.quality for r in q_rs if r.quality is not None])
+            jud = _mean([r.judge_score for r in q_rs if r.judge_score is not None])
             eff, basis = (jud, "judged") if jud is not None else (obj, "checks")
             # throughput: drop offloaded runs
             tps = [r.tokens_per_s for r in cat_rs
@@ -134,7 +167,8 @@ def aggregate_by_model(results: list[RequestResult]) -> tuple[list[ModelRow], li
                 objective=obj, judge=jud, quality=eff, basis=basis,
                 tps=_mean(tps),
                 tps_std=(statistics.stdev(tps) if len(tps) >= 2 else None),
-                n=len(cat_rs),
+                n=len(q_rs),
+                quality_excluded_runs=len(broken_runs),
             )
         rows.append(row)
 

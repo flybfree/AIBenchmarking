@@ -716,9 +716,11 @@ def render_crossrun(rows: list[Any], categories: list[str],
                 continue
             tps = f"{cell.tps:.0f} tok/s" if cell.tps else ""
             tag = "" if cell.basis == "judged" else "<span class='pm'> (checks)</span>"
+            exc = getattr(cell, "quality_excluded_runs", 0)
+            broke = f"<span class='sflag' title='broken/truncated run(s) dropped'> &dagger;{exc}</span>" if exc else ""
             cells.append(
                 f"<td class='num'><b class='{_quality_class(cell.quality)}'>"
-                f"{cell.quality:.2f}</b>{tag}<div class='pm'>{tps} · n={cell.n}</div></td>"
+                f"{cell.quality:.2f}</b>{broke}{tag}<div class='pm'>{tps} · n={cell.n}</div></td>"
             )
         off = getattr(r, "offloaded_runs", 0)
         runs_cell = (f"{len(r.runs)}"
@@ -729,10 +731,18 @@ def render_crossrun(rows: list[Any], categories: list[str],
             f"<td class='num'>{runs_cell}</td>{''.join(cells)}</tr>"
         )
     any_off = any(getattr(r, "offloaded_runs", 0) for r in rows)
+    any_broke = any(getattr(c, "quality_excluded_runs", 0)
+                    for r in rows for c in r.cats.values())
     off_note = (
         "<br>&minus;N off = N run(s) where this unit was CPU-offloaded, excluded "
         "from the pooled throughput (quality still uses every run)."
         if any_off else ""
+    )
+    broke_note = (
+        "<br>&dagger;N on a cell = N run(s) dropped from that quality because the "
+        "output was broken/truncated (empty responses, not a genuine overflow) — "
+        "a config/format bug rather than a real quality result."
+        if any_broke else ""
     )
     matrix = (
         "<h2>Model &times; use-case matrix</h2>"
@@ -740,7 +750,7 @@ def render_crossrun(rows: list[Any], categories: list[str],
         "<p class='muted'>Each cell: effective quality (judge where available, "
         "else objective '(checks)') over pooled throughput and sample count. "
         "Read across a row for a model's profile; down a column to pick a model "
-        f"for one use case.{off_note}</p></div>"
+        f"for one use case.{off_note}{broke_note}</p></div>"
     )
 
     doc = f"""<!doctype html><html><head><meta charset="utf-8">
