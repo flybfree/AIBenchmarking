@@ -19,6 +19,7 @@ stay loose so an ordinary GPU-vs-GPU gap (~1.5-2x) doesn't trip them.
 
 from __future__ import annotations
 
+import statistics
 from dataclasses import dataclass, field
 from statistics import median
 
@@ -27,6 +28,13 @@ from .client import RequestResult
 OFFLOAD_RATIO = 2.5     # peer this many x faster => slow side looks bottlenecked
 TTFT_RATIO = 1.8        # TTFT this many x a peer's => suspicious
 TTFT_TPS_EXCUSE = 1.3   # ...unless throughput is at least this many x the peer's
+# Single-endpoint CPU-offload heuristic: generation that is both LOW and FLAT
+# (near-constant tok/s regardless of task) is the signature of CPU-bound decode
+# because the model doesn't fully fit in VRAM. Modern consumer GPUs run these
+# models well above this floor when fully resident, so a flat median below it is
+# suspicious on its own — no same-model peer required.
+OFFLOAD_TPS_FLOOR = 25.0
+OFFLOAD_FLAT_CV = 0.15
 
 
 @dataclass
@@ -114,5 +122,38 @@ def diagnose(results: list[RequestResult]) -> list[Diagnostic]:
                 f"(batching, context length) or load on {ep}, not hardware; match its "
                 f"settings to {fast_ep}.",
                 categories=names,
+            ))
+
+    # Single-endpoint offload: a flat, low throughput profile on its own (works
+    # even when endpoints run different models, where the same-model check above
+    # doesn't apply). Skip endpoints already flagged offload above.
+    already = {d.endpoint for d in out if d.kind == "offload"}
+    out.extend(d for d in offload_flags(results) if d.endpoint not in already)
+    return out
+
+
+def offload_flags(results: list[RequestResult]) -> list[Diagnostic]:
+    by_ep: dict[str, list[float]] = {}
+    model_of: dict[str, str] = {}
+    for r in results:
+        if r.ok and r.tokens_per_s:
+            by_ep.setdefault(r.endpoint, []).append(r.tokens_per_s)
+            model_of.setdefault(r.endpoint, r.model)
+    out: list[Diagnostic] = []
+    for ep, tps in by_ep.items():
+        if len(tps) < 3:
+            continue
+        mean = statistics.mean(tps)
+        med = statistics.median(tps)
+        cv = statistics.stdev(tps) / mean if mean else 1.0
+        if med < OFFLOAD_TPS_FLOOR and cv < OFFLOAD_FLAT_CV:
+            model = model_of.get(ep, "")
+            out.append(Diagnostic(
+                "offload", ep, model,
+                f"{ep} shows flat, low throughput (median {med:.0f} tok/s, "
+                f"CV {cv*100:.0f}%) running {model} — the signature of CPU offload "
+                f"(the model likely doesn't fully fit in VRAM). Its throughput "
+                f"numbers aren't representative; free VRAM or use a smaller quant "
+                f"on {ep} and re-run. (Quality is unaffected.)",
             ))
     return out
