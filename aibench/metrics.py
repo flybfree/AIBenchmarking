@@ -34,6 +34,13 @@ def _pct(values: list[float], p: float) -> float | None:
 _SPIKE_FACTOR = 3.0
 _SPIKE_FLOOR_MS = 250.0
 
+# Below this median completion-token count, total time is dominated by
+# time-to-first-token (prefill), so tokens/sec mostly reflects that fixed
+# overhead rather than decode speed. Throughput for such short-output groups
+# (e.g. tool calls that emit only a few dozen tokens) is unreliable and should
+# be read with caution — compare TTFT instead.
+SHORT_OUTPUT_TOKENS = 150
+
 
 def _spike_rate(ttft_ms: list[float]) -> float | None:
     vals = [v for v in ttft_ms if v is not None]
@@ -64,6 +71,10 @@ class Aggregate:
     ttft_spike_rate: float | None = None   # fraction of runs with TTFT >> median
     total_s_mean: float | None = None
     completion_tokens_mean: float | None = None
+    completion_tokens_median: float | None = None
+    tps_unreliable: bool = False       # outputs too short for tok/s to be meaningful
+    runaway_n: int = 0                 # runs that hit the token ceiling (finish=length)
+    runaway_rate: float | None = None  # fraction of ok runs that hit the ceiling
     tokens_estimated: bool = False
     reasoning: bool = False            # model emitted thinking tokens
     content_empty_n: int = 0           # runs that produced no visible answer
@@ -102,6 +113,11 @@ def aggregate(
         ttft = [r.ttft_s * 1000 for r in ok if r.ttft_s is not None]
         quals = [r.quality for r in ok if getattr(r, "quality", None) is not None]
         judges = [r.judge_score for r in ok if getattr(r, "judge_score", None) is not None]
+        ctoks = [float(r.completion_tokens) for r in ok if r.completion_tokens]
+        ctok_median = _stat(ctoks, statistics.median)
+        runaways = sum(
+            1 for r in ok if getattr(r, "finish_reason", None) == "length"
+        )
         agg = Aggregate(
             endpoint=endpoint,
             model=sample.model,
@@ -118,10 +134,12 @@ def aggregate(
             ttft_ms_p95=_pct(ttft, 0.95),
             ttft_spike_rate=_spike_rate(ttft),
             total_s_mean=_stat([r.total_s for r in ok], statistics.mean),
-            completion_tokens_mean=_stat(
-                [float(r.completion_tokens) for r in ok if r.completion_tokens],
-                statistics.mean,
-            ),
+            completion_tokens_mean=_stat(ctoks, statistics.mean),
+            completion_tokens_median=ctok_median,
+            tps_unreliable=(ctok_median is not None
+                            and ctok_median < SHORT_OUTPUT_TOKENS),
+            runaway_n=runaways,
+            runaway_rate=(runaways / len(ok) if ok else None),
             tokens_estimated=any(r.tokens_estimated for r in ok),
             reasoning=any(getattr(r, "reasoning", False) for r in ok),
             content_empty_n=sum(1 for r in ok if getattr(r, "content_empty", False)),

@@ -109,7 +109,7 @@ def _table(aggs: list[Aggregate]) -> str:
     head = (
         "<tr><th>Endpoint</th><th>Hardware</th><th>Model</th><th>Task/Group</th>"
         "<th>tok/s (mean)</th><th>tok/s (median)</th><th>TTFT ms (mean)</th>"
-        "<th>TTFT ms p95</th><th>spikes</th><th>total s</th><th>out tok</th>"
+        "<th>TTFT ms p95</th><th>spikes</th><th>runaway</th><th>total s</th><th>out tok</th>"
         "<th>quality</th><th>judge</th><th>ok/n</th><th>notes</th></tr>"
     )
 
@@ -119,6 +119,14 @@ def _table(aggs: list[Aggregate]) -> str:
         pct = a.ttft_spike_rate * 100
         cls = "sflag" if a.ttft_spike_rate > 0.15 else "muted"
         return f"<span class='{cls}'>{pct:.0f}%</span>"
+
+    def runaway(a) -> str:
+        # fraction of runs that hit the token ceiling (finish=length) — an
+        # unbounded-generation / thinking-runaway that spent the whole budget.
+        if not getattr(a, "runaway_rate", None):
+            return "<span class='muted'>—</span>"
+        pct = a.runaway_rate * 100
+        return f"<span class='sflag' title='hit token ceiling'>{pct:.0f}%</span>"
 
     def cell(v, fmt="{:.1f}"):
         return fmt.format(v) if v is not None else "—"
@@ -138,9 +146,16 @@ def _table(aggs: list[Aggregate]) -> str:
             return "—"
         est = " *" if a.tokens_estimated else ""
         if a.tokens_per_s_std is not None:
-            return (f"{a.tokens_per_s_mean:.1f}"
-                    f"<span class='pm'> &plusmn;{a.tokens_per_s_std:.1f}</span>{est}")
-        return f"{a.tokens_per_s_mean:.1f}{est}"
+            base = (f"{a.tokens_per_s_mean:.1f}"
+                    f"<span class='pm'> &plusmn;{a.tokens_per_s_std:.1f}</span>")
+        else:
+            base = f"{a.tokens_per_s_mean:.1f}"
+        # Outputs too short for tok/s to mean much (TTFT-dominated): grey it out
+        # and mark it, so it doesn't read as a real throughput number.
+        if getattr(a, "tps_unreliable", False):
+            return (f"<span class='muted' title='outputs too short — "
+                    f"TTFT-dominated'>&asymp;{base}{est}&nbsp;&dagger;</span>")
+        return f"{base}{est}"
 
     rows = []
     for a in aggs:
@@ -155,6 +170,7 @@ def _table(aggs: list[Aggregate]) -> str:
             f"<td class='num'>{cell(a.ttft_ms_mean)}</td>"
             f"<td class='num'>{cell(a.ttft_ms_p95)}</td>"
             f"<td class='num'>{spikes(a)}</td>"
+            f"<td class='num'>{runaway(a)}</td>"
             f"<td class='num'>{cell(a.total_s_mean, '{:.2f}')}</td>"
             f"<td class='num'>{cell(a.completion_tokens_mean, '{:.0f}')}</td>"
             f"<td class='num'>{_quality_cell(a)}</td>"
@@ -475,15 +491,22 @@ def _comparison_html(comparisons: list[Any], variance: list[Any]) -> str:
         return ""
     rows = []
     for c in comparisons:
-        verdict = ("<b class='q-green'>significant</b>" if c.significant
-                   else ("<b class='q-amber'>within noise</b>" if c.z is not None
-                         else "<b class='muted'>need repeats</b>"))
+        if getattr(c, "unreliable", False):
+            verdict = "<b class='muted' title='outputs too short — TTFT-dominated'>n/a — outputs too short</b>"
+        elif c.significant:
+            verdict = "<b class='q-green'>significant</b>"
+        elif c.z is not None:
+            verdict = "<b class='q-amber'>within noise</b>"
+        else:
+            verdict = "<b class='muted'>need repeats</b>"
+        pct_cell = ("<span class='muted'>&asymp;+%.0f%%</span>" % c.pct
+                    if getattr(c, "unreliable", False) else "+%.0f%%" % c.pct)
         rows.append(
             "<tr>"
             f"<td>{html.escape(c.category)}</td>"
             f"<td><b>{html.escape(c.faster)}</b> {c.faster_mean:.1f}</td>"
             f"<td>{html.escape(c.slower)} {c.slower_mean:.1f}</td>"
-            f"<td class='num'>+{c.pct:.0f}%</td>"
+            f"<td class='num'>{pct_cell}</td>"
             f"<td class='num'>{'%.1f' % c.z if c.z is not None else '—'}</td>"
             f"<td>{verdict}</td>"
             "</tr>"
@@ -577,6 +600,21 @@ def render(
             "outlier (&gt;3x the median and &gt;250 ms) — usually inference-server "
             "jitter, not steady-state latency. Read TTFT as the median/mean; a "
             "high spike rate means the mean is inflated by a few slow first tokens."
+        )
+    if any((a.runaway_rate or 0) > 0 for a in by_task):
+        note_bits.append(
+            "<b>runaway</b>: fraction of runs that hit the token ceiling "
+            "(finish=length) — the model spent its whole budget generating "
+            "(usually unbounded thinking) and was cut off. A persistent rate "
+            "that survives a larger budget is a model stability issue, not a "
+            "cap that's merely too low."
+        )
+    if any(getattr(a, "tps_unreliable", False) for a in by_task):
+        note_bits.append(
+            "<b>&asymp; &dagger; tok/s</b>: outputs in this group are too short "
+            "(median &lt;150 tokens) for tokens/sec to be meaningful — the number "
+            "is dominated by time-to-first-token, not decode speed. Compare TTFT "
+            "for these instead; they're excluded from throughput significance."
         )
     if any(a.tokens_estimated for a in by_task):
         note_bits.append(
