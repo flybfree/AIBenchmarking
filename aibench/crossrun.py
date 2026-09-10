@@ -36,6 +36,7 @@ class ModelRow:
     cats: dict[str, Cell] = field(default_factory=dict)
     runs: set[str] = field(default_factory=set)
     samples: int = 0
+    offloaded_runs: int = 0            # runs excluded from throughput pooling
 
 
 @dataclass
@@ -80,31 +81,61 @@ def _mean(xs):
     return statistics.mean(xs) if xs else None
 
 
-def aggregate_by_model(results: list[RequestResult]) -> tuple[list[ModelRow], list[str]]:
-    """Pool results into (model @ hardware) rows with per-category cells."""
-    categories = sorted({r.category for r in results if r.category})
-    rows: dict[tuple[str, str], ModelRow] = {}
-    # group results by (model, hardware, category)
-    buckets: dict[tuple[str, str, str], list[RequestResult]] = {}
-    for r in results:
-        if not r.ok or not r.category:
+def _offloaded_runs_for_unit(unit_results: list[RequestResult]) -> set[str]:
+    """Which of this (model @ hardware)'s runs look CPU-offloaded — flat, low
+    throughput — so they can be excluded from throughput pooling. Reuses the
+    single-endpoint offload thresholds."""
+    from .diagnose import OFFLOAD_TPS_FLOOR, OFFLOAD_FLAT_CV
+    by_run: dict[str, list[float]] = {}
+    for r in unit_results:
+        if r.tokens_per_s:
+            by_run.setdefault(getattr(r, "run_label", "?"), []).append(r.tokens_per_s)
+    bad = set()
+    for run, tps in by_run.items():
+        if len(tps) < 3:
             continue
-        buckets.setdefault((r.model, r.hardware, r.category), []).append(r)
+        mean = statistics.mean(tps)
+        if mean and statistics.median(tps) < OFFLOAD_TPS_FLOOR \
+                and statistics.stdev(tps) / mean < OFFLOAD_FLAT_CV:
+            bad.add(run)
+    return bad
 
-    for (model, hardware, cat), rs in buckets.items():
-        row = rows.setdefault((model, hardware), ModelRow(model, hardware))
-        tps = [r.tokens_per_s for r in rs if r.tokens_per_s]
-        obj = _mean([r.quality for r in rs if r.quality is not None])
-        jud = _mean([r.judge_score for r in rs if r.judge_score is not None])
-        eff, basis = (jud, "judged") if jud is not None else (obj, "checks")
-        row.cats[cat] = Cell(
-            objective=obj, judge=jud, quality=eff, basis=basis,
-            tps=_mean(tps),
-            tps_std=(statistics.stdev(tps) if len(tps) >= 2 else None),
-            n=len(rs),
-        )
-        row.runs.update(getattr(r, "run_label", "?") for r in rs)
-        row.samples += len(rs)
 
-    ordered = sorted(rows.values(), key=lambda r: (r.model, r.hardware))
-    return ordered, categories
+def aggregate_by_model(results: list[RequestResult]) -> tuple[list[ModelRow], list[str]]:
+    """Pool results into (model @ hardware) rows with per-category cells.
+
+    Quality pools across all runs (offload doesn't change correctness), but
+    throughput excludes any run in which this unit was CPU-offloaded, so one bad
+    run doesn't drag the pooled tok/s."""
+    categories = sorted({r.category for r in results if r.category})
+    by_unit: dict[tuple[str, str], list[RequestResult]] = {}
+    for r in results:
+        if r.ok and r.category:
+            by_unit.setdefault((r.model, r.hardware), []).append(r)
+
+    rows: list[ModelRow] = []
+    for (model, hardware), unit_rs in by_unit.items():
+        row = ModelRow(model, hardware)
+        offloaded = _offloaded_runs_for_unit(unit_rs)
+        row.offloaded_runs = len(offloaded)
+        row.runs = {getattr(r, "run_label", "?") for r in unit_rs}
+        row.samples = len(unit_rs)
+        for cat in categories:
+            cat_rs = [r for r in unit_rs if r.category == cat]
+            if not cat_rs:
+                continue
+            obj = _mean([r.quality for r in cat_rs if r.quality is not None])
+            jud = _mean([r.judge_score for r in cat_rs if r.judge_score is not None])
+            eff, basis = (jud, "judged") if jud is not None else (obj, "checks")
+            # throughput: drop offloaded runs
+            tps = [r.tokens_per_s for r in cat_rs
+                   if r.tokens_per_s and getattr(r, "run_label", "?") not in offloaded]
+            row.cats[cat] = Cell(
+                objective=obj, judge=jud, quality=eff, basis=basis,
+                tps=_mean(tps),
+                tps_std=(statistics.stdev(tps) if len(tps) >= 2 else None),
+                n=len(cat_rs),
+            )
+        rows.append(row)
+
+    return sorted(rows, key=lambda r: (r.model, r.hardware)), categories

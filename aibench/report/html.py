@@ -720,18 +720,27 @@ def render_crossrun(rows: list[Any], categories: list[str],
                 f"<td class='num'><b class='{_quality_class(cell.quality)}'>"
                 f"{cell.quality:.2f}</b>{tag}<div class='pm'>{tps} · n={cell.n}</div></td>"
             )
+        off = getattr(r, "offloaded_runs", 0)
+        runs_cell = (f"{len(r.runs)}"
+                     + (f"<span class='sflag'> &minus;{off} off</span>" if off else ""))
         mrows.append(
             f"<tr><td><b>{html.escape(r.model.split('/')[-1][:48])}</b></td>"
             f"<td>{html.escape(r.hardware)}</td>"
-            f"<td class='num'>{len(r.runs)}</td>{''.join(cells)}</tr>"
+            f"<td class='num'>{runs_cell}</td>{''.join(cells)}</tr>"
         )
+    any_off = any(getattr(r, "offloaded_runs", 0) for r in rows)
+    off_note = (
+        "<br>&minus;N off = N run(s) where this unit was CPU-offloaded, excluded "
+        "from the pooled throughput (quality still uses every run)."
+        if any_off else ""
+    )
     matrix = (
         "<h2>Model &times; use-case matrix</h2>"
         f"<div class='card'><table>{head}{''.join(mrows)}</table>"
         "<p class='muted'>Each cell: effective quality (judge where available, "
         "else objective '(checks)') over pooled throughput and sample count. "
         "Read across a row for a model's profile; down a column to pick a model "
-        "for one use case.</p></div>"
+        f"for one use case.{off_note}</p></div>"
     )
 
     doc = f"""<!doctype html><html><head><meta charset="utf-8">
