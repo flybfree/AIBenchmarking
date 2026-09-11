@@ -245,3 +245,33 @@ async def run_request(
         result.error = f"{type(e).__name__}: {e}"
 
     return result.finalize()
+
+
+async def probe_endpoint(endpoint: Endpoint, timeout_s: float = 15.0) -> tuple[bool, str]:
+    """Lightweight reachability + model check for one endpoint.
+
+    Sends a 1-token completion so we verify not just that the host is up but
+    that the configured model actually answers. Returns (ok, human-readable
+    detail) — used by the run preflight to detect dead endpoints before
+    committing to a full benchmark.
+    """
+    body = {
+        "model": endpoint.model,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 1,
+        "stream": False,
+    }
+    headers = {"Content-Type": "application/json"}
+    key = endpoint.resolved_key
+    if key and key != "not-needed":
+        headers["Authorization"] = f"Bearer {key}"
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(endpoint.chat_url, json=body,
+                                  headers=headers, timeout=timeout_s)
+        if r.status_code == 200:
+            return True, "OK"
+        detail = (r.text or "").strip().replace("\n", " ")[:160]
+        return False, f"HTTP {r.status_code}: {detail}"
+    except httpx.HTTPError as e:
+        return False, f"{type(e).__name__}: {e}"
