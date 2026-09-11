@@ -210,6 +210,60 @@ def _print_summary(by_cat) -> None:
             out(f"{a.endpoint:20} {a.group:18} {tps:>8} tok/s  ok {a.n_ok}/{a.n}")
 
 
+def _endpoint_preflight(cfg, allow_partial: bool = False) -> int:
+    """Probe every endpoint; on any dead one, decide whether to proceed.
+
+    Returns 0 to continue (cfg.endpoints is narrowed to the live set when some
+    were dropped), or 1 to abort. All-dead always aborts.
+    """
+    import sys
+    from .client import probe_endpoint
+
+    async def _probe_all():
+        results = []
+        for ep in cfg.endpoints:
+            ok, detail = await probe_endpoint(ep, timeout_s=min(cfg.timeout_s, 15))
+            results.append((ep, ok, detail))
+        return results
+
+    out("Checking endpoints ...")
+    probes = asyncio.run(_probe_all())
+    live, dead = [], []
+    for ep, ok, detail in probes:
+        status = "OK" if ok else f"UNREACHABLE ({detail})"
+        out(f"  {ep.name:16} {ep.model.split('/')[-1][:40]:40} {status}")
+        (live if ok else dead).append(ep)
+
+    if not dead:
+        return 0
+    if not live:
+        out("\nAll endpoints are unreachable — nothing to benchmark. "
+            "Start the inference server(s) and retry.")
+        return 1
+
+    dead_names = ", ".join(e.name for e in dead)
+    live_names = ", ".join(e.name for e in live)
+    out(f"\n{len(dead)} endpoint(s) unreachable: {dead_names}. "
+        f"{len(live)} live: {live_names}.")
+
+    proceed = allow_partial
+    if not proceed and sys.stdin is not None and sys.stdin.isatty():
+        try:
+            ans = input(f"Proceed with only the live endpoint(s) [{live_names}]? [y/N] ")
+        except EOFError:
+            ans = ""
+        proceed = ans.strip().lower() in ("y", "yes")
+
+    if not proceed:
+        out("Aborting. Re-run with --allow-partial to benchmark only the live "
+            "endpoint(s), or bring the unreachable one(s) up.")
+        return 1
+
+    out(f"Proceeding with {len(live)} live endpoint(s): {live_names}.\n")
+    cfg.endpoints = live
+    return 0
+
+
 def _cmd_run(args) -> int:
     cfg = RunConfig.load(args.config)
     if args.out:
@@ -224,6 +278,16 @@ def _cmd_run(args) -> int:
         cfg.concurrency = args.concurrency
     if args.parallel_endpoints is not None:
         cfg.parallel_endpoints = args.parallel_endpoints
+
+    # Endpoint preflight: don't commit to a full benchmark against a dead
+    # endpoint. Probe each one; if any are unreachable, only proceed on the
+    # live ones with the user's explicit permission (--allow-partial, or an
+    # interactive yes). This keeps a partial run an informed choice, not a
+    # surprise, and makes single-endpoint runs work when a box is down.
+    rc = _endpoint_preflight(cfg, allow_partial=args.allow_partial)
+    if rc != 0:
+        return rc
+
     # Fail fast on a misconfigured judge before running the whole benchmark.
     if cfg.judge and not args.no_judge:
         from .scoring.judge import preflight
@@ -412,6 +476,12 @@ def build_parser() -> argparse.ArgumentParser:
                    action="store_true", default=None,
                    help="Benchmark all endpoints at once. Only for endpoints on "
                         "SEPARATE machines (shared-GPU endpoints would skew timings).")
+    r.add_argument("--allow-partial", "--skip-unreachable", dest="allow_partial",
+                   action="store_true",
+                   help="If some endpoints are unreachable at preflight, proceed "
+                        "with only the live ones instead of aborting (all-dead "
+                        "still aborts). Grants permission up front for "
+                        "non-interactive runs.")
     r.add_argument("--no-score", action="store_true",
                    help="Skip Phase 2 reference-based quality scoring.")
     r.add_argument("--judge", action="store_true",
