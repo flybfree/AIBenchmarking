@@ -714,7 +714,8 @@ def render_crossrun(rows: list[Any], categories: list[str],
     lead_blocks = []
     for cat in categories:
         ranked = sorted(
-            [r for r in rows if cat in r.cats and r.cats[cat].quality is not None],
+            [r for r in rows if cat in r.cats and r.cats[cat].quality is not None
+             and not getattr(r.cats[cat], "failed", False)],
             key=lambda r: (r.cats[cat].quality, r.cats[cat].tps or 0),
             reverse=True,
         )
@@ -741,14 +742,22 @@ def render_crossrun(rows: list[Any], categories: list[str],
         "(noisier — different concurrency/load).</p></div>"
     )
 
-    # Full model x use-case matrix.
-    head = ("<tr><th>Model</th><th>Hardware</th><th>runs</th>"
+    # Full model x use-case matrix, ranked best-first by overall quality.
+    head = ("<tr><th>Model</th><th>Hardware</th><th>overall</th><th>runs</th>"
             + "".join(f"<th>{html.escape(c)}</th>" for c in categories) + "</tr>")
     mrows = []
-    for r in sorted(rows, key=lambda r: r.model):
+    for r in rows:   # already ordered by overall quality from aggregate_by_model
         cells = []
         for c in categories:
             cell = r.cats.get(c)
+            if getattr(cell, "failed", False):
+                # Attempted but every request errored — a real failure, shown
+                # distinctly from a never-tested "—" so it can't hide.
+                cells.append(
+                    f"<td class='num'><b class='q-red' title='all {cell.failed_n} "
+                    f"request(s) errored'>FAIL</b><div class='pm'>{cell.failed_n} err</div></td>"
+                )
+                continue
             if not cell or cell.quality is None:
                 cells.append("<td class='muted'>—</td>")
                 continue
@@ -760,12 +769,25 @@ def render_crossrun(rows: list[Any], categories: list[str],
                 f"<td class='num'><b class='{_quality_class(cell.quality)}'>"
                 f"{cell.quality:.2f}</b>{broke}{tag}<div class='pm'>{tps} · n={cell.n}</div></td>"
             )
+        # Overall quality (failed categories counted as 0) + completeness badge.
+        oq = getattr(r, "overall_quality", None)
+        if oq is None:
+            overall_cell = "<td class='muted'>—</td>"
+        else:
+            done = f"{r.cats_ok}/{r.cats_attempted}"
+            incomplete = r.cats_ok < r.cats_attempted
+            badge = (f"<span class='sflag' title='{r.cats_attempted - r.cats_ok} "
+                     f"category(ies) failed'> {done}</span>" if incomplete
+                     else f"<span class='pm'> {done}</span>")
+            overall_cell = (f"<td class='num'><b class='{_quality_class(oq)}'>"
+                            f"{oq:.2f}</b>{badge}</td>")
         off = getattr(r, "offloaded_runs", 0)
         runs_cell = (f"{len(r.runs)}"
                      + (f"<span class='sflag'> &minus;{off} off</span>" if off else ""))
         mrows.append(
             f"<tr><td><b>{html.escape(r.model.split('/')[-1][:48])}</b></td>"
             f"<td>{html.escape(r.hardware)}</td>"
+            f"{overall_cell}"
             f"<td class='num'>{runs_cell}</td>{''.join(cells)}</tr>"
         )
     any_off = any(getattr(r, "offloaded_runs", 0) for r in rows)
@@ -785,10 +807,16 @@ def render_crossrun(rows: list[Any], categories: list[str],
     matrix = (
         "<h2>Model &times; use-case matrix</h2>"
         f"<div class='card'><table>{head}{''.join(mrows)}</table>"
-        "<p class='muted'>Each cell: effective quality (judge where available, "
-        "else objective '(checks)') over pooled throughput and sample count. "
-        "Read across a row for a model's profile; down a column to pick a model "
-        f"for one use case.{off_note}{broke_note}</p></div>"
+        "<p class='muted'>Ranked best-first by <b>overall</b> — the mean quality "
+        "across the categories a model was actually run on, with a <b>FAIL</b>ed "
+        "category counted as 0 so a model that can't do a use case can't outrank "
+        "one that can. The badge beside it (e.g. 5/6) is how many attempted "
+        "categories succeeded; a never-tested category is simply absent (—) and "
+        "doesn't affect the score. <b>FAIL</b> = the category was attempted but "
+        "every request errored (a serving/capability failure), distinct from — "
+        "(never tested). Each quality cell: effective quality (judge where "
+        "available, else objective '(checks)') over pooled throughput and sample "
+        f"count.{off_note}{broke_note}</p></div>"
     )
 
     doc = f"""<!doctype html><html><head><meta charset="utf-8">
