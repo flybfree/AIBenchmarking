@@ -23,11 +23,13 @@ class Cell:
     objective: float | None = None
     judge: float | None = None
     quality: float | None = None       # effective: judge if judged, else objective
-    basis: str = ""                    # "judged" | "checks"
+    basis: str = ""                    # "judged" | "checks" | "failed"
     tps: float | None = None
     tps_std: float | None = None
     n: int = 0                         # measured samples pooled
     quality_excluded_runs: int = 0     # runs dropped from quality (truncated/broken)
+    failed: bool = False               # category attempted but every request errored
+    failed_n: int = 0                  # failed requests behind a failed cell
 
 
 @dataclass
@@ -38,6 +40,9 @@ class ModelRow:
     runs: set[str] = field(default_factory=set)
     samples: int = 0
     offloaded_runs: int = 0            # runs excluded from throughput pooling
+    overall_quality: float | None = None  # mean over attempted cats; failed count as 0
+    cats_attempted: int = 0            # categories this unit was actually run on
+    cats_ok: int = 0                   # attempted categories with any successful result
 
 
 @dataclass
@@ -127,22 +132,42 @@ def aggregate_by_model(results: list[RequestResult]) -> tuple[list[ModelRow], li
     throughput excludes any run in which this unit was CPU-offloaded, so one bad
     run doesn't drag the pooled tok/s."""
     categories = sorted({r.category for r in results if r.category})
-    by_unit: dict[tuple[str, str], list[RequestResult]] = {}
+    # Track ALL results (ok or errored) so we can tell a category that was
+    # attempted-but-wholly-failed (a real capability/serving failure, counts
+    # against the model) from one that was simply never run (no data, ignored).
+    all_by_unit: dict[tuple[str, str], list[RequestResult]] = {}
+    ok_by_unit: dict[tuple[str, str], list[RequestResult]] = {}
     for r in results:
-        if r.ok and r.category:
-            by_unit.setdefault((r.model, r.hardware), []).append(r)
+        if not r.category:
+            continue
+        all_by_unit.setdefault((r.model, r.hardware), []).append(r)
+        if r.ok:
+            ok_by_unit.setdefault((r.model, r.hardware), []).append(r)
 
     rows: list[ModelRow] = []
-    for (model, hardware), unit_rs in by_unit.items():
+    for (model, hardware), unit_all in all_by_unit.items():
+        unit_rs = ok_by_unit.get((model, hardware), [])   # successful results only
         row = ModelRow(model, hardware)
         offloaded = _offloaded_runs_for_unit(unit_rs)
         row.offloaded_runs = len(offloaded)
-        row.runs = {getattr(r, "run_label", "?") for r in unit_rs}
+        row.runs = {getattr(r, "run_label", "?") for r in unit_all}
         row.samples = len(unit_rs)
+        q_vals: list[float] = []       # overall = mean of these (failed cats = 0)
         for cat in categories:
-            cat_rs = [r for r in unit_rs if r.category == cat]
+            cat_all = [r for r in unit_all if r.category == cat]
+            if not cat_all:
+                continue               # never attempted — no data, excluded from rank
+            row.cats_attempted += 1
+            cat_rs = [r for r in unit_rs if r.category == cat]   # successful only
             if not cat_rs:
+                # Attempted but every request errored: a hard failure. Record it
+                # as a distinct failed cell that costs the overall score (0), so a
+                # model that can't do a category can't outrank one that can.
+                row.cats[cat] = Cell(quality=0.0, basis="failed", failed=True,
+                                     failed_n=len(cat_all))
+                q_vals.append(0.0)
                 continue
+            row.cats_ok += 1
             # Drop this category's contribution from any run that was mostly
             # broken/truncated (a config/format bug), so it doesn't poison the
             # pooled quality; a genuine overflow (finish="length") is kept.
@@ -170,6 +195,14 @@ def aggregate_by_model(results: list[RequestResult]) -> tuple[list[ModelRow], li
                 n=len(q_rs),
                 quality_excluded_runs=len(broken_runs),
             )
+            if eff is not None:
+                q_vals.append(eff)
+        # Overall = mean over attempted-and-measurable categories, with a
+        # wholly-failed category counted as 0 (so failures cost rank) and a
+        # never-attempted category simply absent.
+        row.overall_quality = (sum(q_vals) / len(q_vals)) if q_vals else None
         rows.append(row)
 
-    return sorted(rows, key=lambda r: (r.model, r.hardware)), categories
+    # Rank best-first by overall quality; ties fall back to name for stability.
+    return sorted(rows, key=lambda r: (-(r.overall_quality if r.overall_quality
+                                         is not None else -1.0), r.model)), categories
