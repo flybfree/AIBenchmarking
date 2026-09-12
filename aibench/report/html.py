@@ -108,7 +108,7 @@ def _judge_cell(a: Aggregate) -> str:
 def _table(aggs: list[Aggregate]) -> str:
     head = (
         "<tr><th>Endpoint</th><th>Hardware</th><th>Model</th><th>Task/Group</th>"
-        "<th>tok/s (mean)</th><th>tok/s (median)</th><th>TTFT ms (mean)</th>"
+        "<th>tok/s (mean)</th><th>tok/s (median)</th><th>agg tok/s</th><th>TTFT ms (mean)</th>"
         "<th>TTFT ms p95</th><th>spikes</th><th>runaway</th><th>total s</th><th>out tok</th>"
         "<th>quality</th><th>judge</th><th>ok/n</th><th>notes</th></tr>"
     )
@@ -130,6 +130,14 @@ def _table(aggs: list[Aggregate]) -> str:
 
     def cell(v, fmt="{:.1f}"):
         return fmt.format(v) if v is not None else "—"
+
+    def agg_cell(a) -> str:
+        # Aggregate throughput across the concurrent batch (serving capacity);
+        # only present when the run used concurrency > 1.
+        v = getattr(a, "agg_tps_mean", None)
+        if not v:
+            return "<span class='muted'>—</span>"
+        return f"<b>{v:.0f}</b>"
 
     def notes(a) -> str:
         flags = []
@@ -167,6 +175,7 @@ def _table(aggs: list[Aggregate]) -> str:
             f"<td>{html.escape(a.group)}</td>"
             f"<td class='num'>{tps_cell(a)}</td>"
             f"<td class='num'>{cell(a.tokens_per_s_median)}</td>"
+            f"<td class='num'>{agg_cell(a)}</td>"
             f"<td class='num'>{cell(a.ttft_ms_mean)}</td>"
             f"<td class='num'>{cell(a.ttft_ms_p95)}</td>"
             f"<td class='num'>{spikes(a)}</td>"
@@ -600,6 +609,16 @@ def render(
             "outlier (&gt;3x the median and &gt;250 ms) — usually inference-server "
             "jitter, not steady-state latency. Read TTFT as the median/mean; a "
             "high spike rate means the mean is inflated by a few slow first tokens."
+        )
+    if any(getattr(a, "agg_tps_mean", None) for a in by_category):
+        note_bits.append(
+            "<b>agg tok/s</b>: aggregate throughput across the concurrent batch "
+            "(total tokens &divide; wall-clock) — the endpoint's real serving "
+            "capacity under load. The per-request <b>tok/s</b> column is one "
+            "stream's decode rate, which GPU contention deflates when "
+            "concurrency&gt;1; <b>agg tok/s</b> is where a stronger GPU's extra "
+            "capacity actually shows. Only populated when the run used "
+            "concurrency&gt;1."
         )
     if any((a.runaway_rate or 0) > 0 for a in by_task):
         note_bits.append(

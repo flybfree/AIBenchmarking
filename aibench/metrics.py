@@ -66,6 +66,10 @@ class Aggregate:
     tokens_per_s_median: float | None = None
     tokens_per_s_std: float | None = None    # sample std dev (n>=2)
     tokens_per_s_n: int = 0                   # samples behind the tok/s stats
+    agg_tps_mean: float | None = None         # aggregate throughput under load
+                                              # (total tokens/wall across a
+                                              # concurrent batch); None at conc==1
+    agg_tps_n: int = 0                        # concurrent batches behind agg_tps
     ttft_ms_mean: float | None = None
     ttft_ms_p95: float | None = None
     ttft_spike_rate: float | None = None   # fraction of runs with TTFT >> median
@@ -118,6 +122,14 @@ def aggregate(
         runaways = sum(
             1 for r in ok if getattr(r, "finish_reason", None) == "length"
         )
+        # Aggregate throughput is a per-batch property (one value shared by a
+        # task's concurrent repeats); dedupe by task so each batch counts once.
+        batch_by_task: dict[str, float] = {}
+        for r in ok:
+            bt = getattr(r, "batch_tps", None)
+            if bt:
+                batch_by_task[r.task] = bt
+        agg_vals = list(batch_by_task.values())
         agg = Aggregate(
             endpoint=endpoint,
             model=sample.model,
@@ -130,6 +142,8 @@ def aggregate(
             tokens_per_s_std=(statistics.stdev([v for v in tps if v is not None])
                               if len([v for v in tps if v is not None]) >= 2 else None),
             tokens_per_s_n=len([v for v in tps if v is not None]),
+            agg_tps_mean=(statistics.mean(agg_vals) if agg_vals else None),
+            agg_tps_n=len(agg_vals),
             ttft_ms_mean=_stat(ttft, statistics.mean),
             ttft_ms_p95=_pct(ttft, 0.95),
             ttft_spike_rate=_spike_rate(ttft),

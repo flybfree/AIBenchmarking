@@ -183,8 +183,8 @@ def _print_quality_comparison(results) -> None:
 def _print_summary(by_cat) -> None:
     if _console:
         table = Table(title="Per-category summary")
-        num_cols = ("tok/s", "TTFT ms", "p95", "spikes", "runaway", "quality")
-        for col in ("Endpoint", "Hardware", "Category", "tok/s", "TTFT ms", "p95", "spikes", "runaway", "quality", "ok/n"):
+        num_cols = ("tok/s", "agg", "TTFT ms", "p95", "spikes", "runaway", "quality")
+        for col in ("Endpoint", "Hardware", "Category", "tok/s", "agg", "TTFT ms", "p95", "spikes", "runaway", "quality", "ok/n"):
             table.add_column(col, justify="right" if col in num_cols else "left")
         for a in by_cat:
             if a.tokens_per_s_mean is None:
@@ -193,9 +193,11 @@ def _print_summary(by_cat) -> None:
                 tps = f"~{a.tokens_per_s_mean:.1f}~"   # short output: TTFT-dominated
             else:
                 tps = f"{a.tokens_per_s_mean:.1f}"
+            agg = f"{a.agg_tps_mean:.0f}" if getattr(a, "agg_tps_mean", None) else "—"
             table.add_row(
                 a.endpoint, a.hardware, a.group,
                 tps,
+                agg,
                 f"{a.ttft_ms_mean:.0f}" if a.ttft_ms_mean else "—",
                 f"{a.ttft_ms_p95:.0f}" if a.ttft_ms_p95 else "—",
                 f"{a.ttft_spike_rate*100:.0f}%" if a.ttft_spike_rate is not None else "—",

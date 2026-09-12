@@ -9,6 +9,7 @@ sequentially so they don't compete for the same hardware and distort timing.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable
@@ -97,9 +98,23 @@ async def _run_endpoint(
                 await one(w, True)
             # Measured runs — respect concurrency for throughput-under-load.
             if cfg.concurrency > 1:
+                # Time the whole concurrent batch so we can report AGGREGATE
+                # throughput (total tokens / wall-clock) — the box's real serving
+                # capacity under load, as opposed to the per-stream tok/s each
+                # request records (which is deflated by GPU contention).
+                before = len(results)
+                t0 = time.perf_counter()
                 await asyncio.gather(
                     *(one(i, False) for i in range(cfg.repeats))
                 )
+                wall = time.perf_counter() - t0
+                batch = results[before:]
+                total_ctok = sum((r.completion_tokens or 0) for r in batch if r.ok)
+                if wall > 0 and total_ctok:
+                    batch_tps = total_ctok / wall
+                    for r in batch:
+                        if r.ok:
+                            r.batch_tps = batch_tps
             else:
                 for i in range(cfg.repeats):
                     await one(i, False)
