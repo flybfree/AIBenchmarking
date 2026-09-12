@@ -330,13 +330,21 @@ _CSS = """
   --green:#63d47f; --amber:#e6b24a; --red:#f47163;
 } }
 body { font: 14px/1.5 system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--fg); }
-.wrap { max-width: 900px; margin: 0 auto; padding: 24px; }
+/* Use most of the viewport (wide tables — per-category, the matrix, the outputs
+   grid — need the room) but cap on ultrawide so lines don't get unwieldy. */
+.wrap { max-width: min(1680px, 96vw); margin: 0 auto; padding: 24px 28px; }
 h1, h2 { color: var(--fg); }
 h1 { font-size: 22px; margin: 0 0 4px; }
 h2 { font-size: 17px; margin: 28px 0 10px; }
+/* Keep running prose at a readable measure even though the page is wide;
+   tables and cards still span the full width. */
+p { max-width: 82ch; }
 .muted { color: var(--muted); font-size: 12px; }
 .card { background:var(--card); color:var(--fg); border:1px solid var(--border); border-radius:10px; padding:16px; margin:12px 0; }
-table { border-collapse: collapse; width: 100%; font-size: 12.5px; overflow-x:auto; display:block; }
+/* Size to content so small tables (meta, endpoints) don't stretch sparsely
+   across the wide page, but cap at the container and scroll when a big table
+   (per-category, the matrix) is wider than the viewport. */
+table { border-collapse: collapse; width: max-content; max-width: 100%; font-size: 12.5px; overflow-x:auto; display:block; }
 th, td { padding: 6px 9px; text-align: left; border-bottom: 1px solid var(--hair); white-space: nowrap; color: var(--fg); }
 th { background:var(--th-bg); position: sticky; top:0; font-weight:600; }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
