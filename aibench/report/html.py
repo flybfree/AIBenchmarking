@@ -710,7 +710,57 @@ def render_crossrun(rows: list[Any], categories: list[str],
         f"{run_rows}</table></div>"
     )
 
-    # Per-use-case leaders (ranked by effective quality, then throughput).
+    # Best-model-per-machine recommendation: for each endpoint, the model to run
+    # for each use case (best quality, or a faster same-machine model of
+    # comparable quality). This is the headline for per-machine deployment.
+    from ..crossrun import per_machine_recommendations
+    rec_map = per_machine_recommendations(rows, categories)
+    hw_best: dict[str, float] = {}
+    for r in rows:
+        hw_best[r.hardware] = max(hw_best.get(r.hardware, -1.0),
+                                  r.overall_quality if r.overall_quality is not None else -1.0)
+    rec_cards = []
+    for hw in sorted(rec_map, key=lambda h: hw_best.get(h, -1.0), reverse=True):
+        recs = rec_map[hw]
+        if not recs:
+            continue
+        rrows = "".join(
+            f"<tr><td>{html.escape(rc.category)}</td>"
+            f"<td><b>{html.escape(rc.model.split('/')[-1][:44])}</b>"
+            f"<span class='pm'> · {rc.runs} run(s)</span></td>"
+            f"<td class='num'><b class='{_quality_class(rc.quality)}'>{rc.quality:.2f}</b>"
+            + ("" if rc.basis == "judged" else "<span class='pm'> (checks)</span>")
+            + "</td>"
+            f"<td class='num'>{('%.0f' % rc.tps) if rc.tps else '—'}</td>"
+            f"<td class='muted'>{html.escape(rc.note)}</td></tr>"
+            for rc in recs
+        )
+        rec_cards.append(
+            f"<div class='reccard'><h3>{html.escape(hw)}</h3><table>"
+            "<tr><th>Use case</th><th>Run this model</th><th>quality</th>"
+            f"<th>tok/s</th><th>why</th></tr>{rrows}</table></div>"
+        )
+    recommendations = (
+        "<h2>Best model per machine — by use case</h2>"
+        f"<div class='card'>{''.join(rec_cards)}"
+        "<p class='muted'>For each endpoint, the model to run for each use case: "
+        "best quality, unless a faster model on the same machine reaches "
+        "comparable quality (within 0.05) — then the faster one wins, so the box "
+        "is fully utilized. Failed categories are never recommended. Assign each "
+        "machine a model per use case from here.</p></div>"
+    )
+
+    # Per-use-case leaders, grouped by endpoint (hardware) so you can pick the
+    # best model for each use case ON EACH machine, then ranked by quality.
+    def _lead_li(r, cat) -> str:
+        q = r.cats[cat].quality
+        tps = r.cats[cat].tps
+        name = html.escape(r.model.split('/')[-1][:44])
+        if tps:
+            return (f"<li><b class='{_quality_class(q)}'>{q:.2f}</b> {name} "
+                    f"<span class='muted'>· {tps:.0f} tok/s</span></li>")
+        return f"<li><b class='{_quality_class(q)}'>{q:.2f}</b> {name}</li>"
+
     lead_blocks = []
     for cat in categories:
         ranked = sorted(
@@ -721,75 +771,95 @@ def render_crossrun(rows: list[Any], categories: list[str],
         )
         if not ranked:
             continue
-        items = "".join(
-            f"<li><b class='{_quality_class(r.cats[cat].quality)}'>{r.cats[cat].quality:.2f}</b> "
-            f"{html.escape(r.model.split('/')[-1][:44])} "
-            f"<span class='muted'>@ {html.escape(r.hardware)} · "
-            f"{r.cats[cat].tps:.0f} tok/s</span></li>"
-            if r.cats[cat].tps else
-            f"<li><b class='{_quality_class(r.cats[cat].quality)}'>{r.cats[cat].quality:.2f}</b> "
-            f"{html.escape(r.model.split('/')[-1][:44])}</li>"
-            for r in ranked
+        # Split the ranking per endpoint; order endpoints by their best entry.
+        by_hw: dict[str, list] = {}
+        for r in ranked:
+            by_hw.setdefault(r.hardware, []).append(r)
+        hw_order = sorted(by_hw, key=lambda hw: by_hw[hw][0].cats[cat].quality,
+                          reverse=True)
+        sub = "".join(
+            f"<div class='leadhw'><div class='hwname'>{html.escape(hw)}</div>"
+            f"<ol>{''.join(_lead_li(r, cat) for r in by_hw[hw])}</ol></div>"
+            for hw in hw_order
         )
         lead_blocks.append(
-            f"<div class='leadcat'><h3>{html.escape(cat)}</h3><ol>{items}</ol></div>"
+            f"<div class='leadcat'><h3>{html.escape(cat)}</h3>{sub}</div>"
         )
     leaders = (
-        "<h2>Leaders by use case — best quality first</h2>"
+        "<h2>Leaders by use case — by endpoint, best quality first</h2>"
         f"<div class='card'><div class='leadgrid'>{''.join(lead_blocks)}</div>"
-        "<p class='muted'>Quality is the LLM-judge score where a run judged that "
-        "task, else the objective checks. Throughput is pooled across runs "
-        "(noisier — different concurrency/load).</p></div>"
+        "<p class='muted'>Each use case is split by endpoint (hardware) so you "
+        "can pick the best model per machine. Quality is the LLM-judge score "
+        "where a run judged that task, else the objective checks. Throughput is "
+        "pooled across runs (noisier — different concurrency/load).</p></div>"
     )
 
-    # Full model x use-case matrix, ranked best-first by overall quality.
-    head = ("<tr><th>Model</th><th>Hardware</th><th>overall</th><th>runs</th>"
+    # Full model x use-case matrix, grouped by endpoint (hardware); within each
+    # endpoint, ranked best-first by overall quality. The Hardware column is
+    # dropped since it's now the section header.
+    ncols = 3 + len(categories)   # Model, overall, runs, + one per category
+    head = ("<tr><th>Model</th><th>overall</th><th>runs</th>"
             + "".join(f"<th>{html.escape(c)}</th>" for c in categories) + "</tr>")
+
+    # Group the overall-ranked rows by hardware, ordering endpoints by their
+    # strongest unit so the section with the best model comes first.
+    hw_groups: dict[str, list] = {}
+    for r in rows:   # rows arrive overall-ranked from aggregate_by_model
+        hw_groups.setdefault(r.hardware, []).append(r)
+    hw_order = sorted(
+        hw_groups,
+        key=lambda hw: max((g.overall_quality or -1) for g in hw_groups[hw]),
+        reverse=True,
+    )
+
     mrows = []
-    for r in rows:   # already ordered by overall quality from aggregate_by_model
-        cells = []
-        for c in categories:
-            cell = r.cats.get(c)
-            if getattr(cell, "failed", False):
-                # Attempted but every request errored — a real failure, shown
-                # distinctly from a never-tested "—" so it can't hide.
-                cells.append(
-                    f"<td class='num'><b class='q-red' title='all {cell.failed_n} "
-                    f"request(s) errored'>FAIL</b><div class='pm'>{cell.failed_n} err</div></td>"
-                )
-                continue
-            if not cell or cell.quality is None:
-                cells.append("<td class='muted'>—</td>")
-                continue
-            tps = f"{cell.tps:.0f} tok/s" if cell.tps else ""
-            tag = "" if cell.basis == "judged" else "<span class='pm'> (checks)</span>"
-            exc = getattr(cell, "quality_excluded_runs", 0)
-            broke = f"<span class='sflag' title='broken/truncated run(s) dropped'> &dagger;{exc}</span>" if exc else ""
-            cells.append(
-                f"<td class='num'><b class='{_quality_class(cell.quality)}'>"
-                f"{cell.quality:.2f}</b>{broke}{tag}<div class='pm'>{tps} · n={cell.n}</div></td>"
-            )
-        # Overall quality (failed categories counted as 0) + completeness badge.
-        oq = getattr(r, "overall_quality", None)
-        if oq is None:
-            overall_cell = "<td class='muted'>—</td>"
-        else:
-            done = f"{r.cats_ok}/{r.cats_attempted}"
-            incomplete = r.cats_ok < r.cats_attempted
-            badge = (f"<span class='sflag' title='{r.cats_attempted - r.cats_ok} "
-                     f"category(ies) failed'> {done}</span>" if incomplete
-                     else f"<span class='pm'> {done}</span>")
-            overall_cell = (f"<td class='num'><b class='{_quality_class(oq)}'>"
-                            f"{oq:.2f}</b>{badge}</td>")
-        off = getattr(r, "offloaded_runs", 0)
-        runs_cell = (f"{len(r.runs)}"
-                     + (f"<span class='sflag'> &minus;{off} off</span>" if off else ""))
+    for hw in hw_order:
         mrows.append(
-            f"<tr><td><b>{html.escape(r.model.split('/')[-1][:48])}</b></td>"
-            f"<td>{html.escape(r.hardware)}</td>"
-            f"{overall_cell}"
-            f"<td class='num'>{runs_cell}</td>{''.join(cells)}</tr>"
+            f"<tr class='grouphdr'><td colspan='{ncols}'>{html.escape(hw)}</td></tr>"
         )
+        for r in hw_groups[hw]:
+            cells = []
+            for c in categories:
+                cell = r.cats.get(c)
+                if getattr(cell, "failed", False):
+                    # Attempted but every request errored — a real failure, shown
+                    # distinctly from a never-tested "—" so it can't hide.
+                    cells.append(
+                        f"<td class='num'><b class='q-red' title='all {cell.failed_n} "
+                        f"request(s) errored'>FAIL</b><div class='pm'>{cell.failed_n} err</div></td>"
+                    )
+                    continue
+                if not cell or cell.quality is None:
+                    cells.append("<td class='muted'>—</td>")
+                    continue
+                tps = f"{cell.tps:.0f} tok/s" if cell.tps else ""
+                tag = "" if cell.basis == "judged" else "<span class='pm'> (checks)</span>"
+                exc = getattr(cell, "quality_excluded_runs", 0)
+                broke = f"<span class='sflag' title='broken/truncated run(s) dropped'> &dagger;{exc}</span>" if exc else ""
+                cells.append(
+                    f"<td class='num'><b class='{_quality_class(cell.quality)}'>"
+                    f"{cell.quality:.2f}</b>{broke}{tag}<div class='pm'>{tps} · n={cell.n}</div></td>"
+                )
+            # Overall quality (failed categories counted as 0) + completeness badge.
+            oq = getattr(r, "overall_quality", None)
+            if oq is None:
+                overall_cell = "<td class='muted'>—</td>"
+            else:
+                done = f"{r.cats_ok}/{r.cats_attempted}"
+                incomplete = r.cats_ok < r.cats_attempted
+                badge = (f"<span class='sflag' title='{r.cats_attempted - r.cats_ok} "
+                         f"category(ies) failed'> {done}</span>" if incomplete
+                         else f"<span class='pm'> {done}</span>")
+                overall_cell = (f"<td class='num'><b class='{_quality_class(oq)}'>"
+                                f"{oq:.2f}</b>{badge}</td>")
+            off = getattr(r, "offloaded_runs", 0)
+            runs_cell = (f"{len(r.runs)}"
+                         + (f"<span class='sflag'> &minus;{off} off</span>" if off else ""))
+            mrows.append(
+                f"<tr><td><b>{html.escape(r.model.split('/')[-1][:48])}</b></td>"
+                f"{overall_cell}"
+                f"<td class='num'>{runs_cell}</td>{''.join(cells)}</tr>"
+            )
     any_off = any(getattr(r, "offloaded_runs", 0) for r in rows)
     any_broke = any(getattr(c, "quality_excluded_runs", 0)
                     for r in rows for c in r.cats.values())
@@ -807,7 +877,8 @@ def render_crossrun(rows: list[Any], categories: list[str],
     matrix = (
         "<h2>Model &times; use-case matrix</h2>"
         f"<div class='card'><table>{head}{''.join(mrows)}</table>"
-        "<p class='muted'>Ranked best-first by <b>overall</b> — the mean quality "
+        "<p class='muted'>Grouped by endpoint (hardware); within each, ranked "
+        "best-first by <b>overall</b> — the mean quality "
         "across the categories a model was actually run on, with a <b>FAIL</b>ed "
         "category counted as 0 so a model that can't do a use case can't outrank "
         "one that can. The badge beside it (e.g. 5/6) is how many attempted "
@@ -824,11 +895,19 @@ def render_crossrun(rows: list[Any], categories: list[str],
 <title>aibench leaderboard</title><style>{_CSS}
 .leadgrid {{ display:grid; grid-template-columns: repeat(auto-fit, minmax(240px,1fr)); gap:16px; }}
 .leadcat h3 {{ margin:4px 0 6px; font-size:14px; }}
-.leadcat ol {{ margin:0; padding-left:22px; }}
+.leadcat ol {{ margin:0 0 2px; padding-left:22px; }}
 .leadcat li {{ margin-bottom:4px; }}
+.leadhw {{ margin-bottom:8px; }}
+.hwname {{ font-size:12px; font-weight:600; color:var(--muted); margin:2px 0; }}
+tr.grouphdr td {{ background:var(--soft-bg); color:var(--fg); font-weight:700;
+  padding:6px 10px; border-top:2px solid var(--border); }}
+.reccard {{ margin-bottom:18px; }}
+.reccard h3 {{ margin:4px 0 6px; font-size:14px; }}
 </style></head><body><div class="wrap">
 <h1>AI Benchmark — Cross-run Leaderboard</h1>
 <p class="muted">{len(rows)} model/hardware units pooled across {len(run_meta)} run(s).</p>
+
+{recommendations}
 
 {leaders}
 

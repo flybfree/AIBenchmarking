@@ -206,3 +206,61 @@ def aggregate_by_model(results: list[RequestResult]) -> tuple[list[ModelRow], li
     # Rank best-first by overall quality; ties fall back to name for stability.
     return sorted(rows, key=lambda r: (-(r.overall_quality if r.overall_quality
                                          is not None else -1.0), r.model)), categories
+
+
+@dataclass
+class Rec:
+    category: str
+    model: str
+    quality: float
+    basis: str            # "judged" | "checks"
+    tps: float | None
+    runs: int
+    note: str
+
+
+def per_machine_recommendations(
+    rows: list[ModelRow], categories: list[str]
+) -> dict[str, list[Rec]]:
+    """For each hardware/endpoint, the model to run for each use case.
+
+    The goal is per-machine deployment: which model best serves each use case
+    ON THAT MACHINE. Picks the best-quality model, unless a faster one on the
+    same machine reaches comparable quality (within QUALITY_EPS) — the smaller/
+    faster model is the right pick when it's good enough. Never recommends a
+    model that FAILED the category. Returns {hardware: [Rec, ...]}.
+    """
+    from .scorecard import QUALITY_EPS
+
+    by_hw: dict[str, list[ModelRow]] = {}
+    for r in rows:
+        by_hw.setdefault(r.hardware, []).append(r)
+
+    out: dict[str, list[Rec]] = {}
+    for hw, units in by_hw.items():
+        recs: list[Rec] = []
+        for cat in categories:
+            cands = [
+                (u, u.cats[cat]) for u in units
+                if cat in u.cats and u.cats[cat].quality is not None
+                and not u.cats[cat].failed
+            ]
+            if not cands:
+                continue
+            best_u, best_c = max(cands, key=lambda t: t[1].quality)
+            with_tps = [(u, c) for (u, c) in cands if c.tps]
+            fastest = max(with_tps, key=lambda t: t[1].tps) if with_tps else None
+            if (fastest and fastest[0] is not best_u
+                    and fastest[1].quality >= best_c.quality - QUALITY_EPS):
+                fu, fc = fastest
+                note = (f"comparable quality ({fc.quality:.2f} vs {best_c.quality:.2f}) "
+                        f"at higher speed ({fc.tps:.0f} vs {best_c.tps:.0f} tok/s)")
+                pick_u, pick_c = fu, fc
+            else:
+                pick_u, pick_c = best_u, best_c
+                note = (f"best quality ({best_c.quality:.2f})"
+                        + (f" @ {best_c.tps:.0f} tok/s" if best_c.tps else ""))
+            recs.append(Rec(cat, pick_u.model, pick_c.quality, pick_c.basis,
+                            pick_c.tps, len(pick_u.runs), note))
+        out[hw] = recs
+    return out
