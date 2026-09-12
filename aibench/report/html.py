@@ -710,6 +710,46 @@ def render_crossrun(rows: list[Any], categories: list[str],
         f"{run_rows}</table></div>"
     )
 
+    # Best-model-per-machine recommendation: for each endpoint, the model to run
+    # for each use case (best quality, or a faster same-machine model of
+    # comparable quality). This is the headline for per-machine deployment.
+    from ..crossrun import per_machine_recommendations
+    rec_map = per_machine_recommendations(rows, categories)
+    hw_best: dict[str, float] = {}
+    for r in rows:
+        hw_best[r.hardware] = max(hw_best.get(r.hardware, -1.0),
+                                  r.overall_quality if r.overall_quality is not None else -1.0)
+    rec_cards = []
+    for hw in sorted(rec_map, key=lambda h: hw_best.get(h, -1.0), reverse=True):
+        recs = rec_map[hw]
+        if not recs:
+            continue
+        rrows = "".join(
+            f"<tr><td>{html.escape(rc.category)}</td>"
+            f"<td><b>{html.escape(rc.model.split('/')[-1][:44])}</b>"
+            f"<span class='pm'> · {rc.runs} run(s)</span></td>"
+            f"<td class='num'><b class='{_quality_class(rc.quality)}'>{rc.quality:.2f}</b>"
+            + ("" if rc.basis == "judged" else "<span class='pm'> (checks)</span>")
+            + "</td>"
+            f"<td class='num'>{('%.0f' % rc.tps) if rc.tps else '—'}</td>"
+            f"<td class='muted'>{html.escape(rc.note)}</td></tr>"
+            for rc in recs
+        )
+        rec_cards.append(
+            f"<div class='reccard'><h3>{html.escape(hw)}</h3><table>"
+            "<tr><th>Use case</th><th>Run this model</th><th>quality</th>"
+            f"<th>tok/s</th><th>why</th></tr>{rrows}</table></div>"
+        )
+    recommendations = (
+        "<h2>Best model per machine — by use case</h2>"
+        f"<div class='card'>{''.join(rec_cards)}"
+        "<p class='muted'>For each endpoint, the model to run for each use case: "
+        "best quality, unless a faster model on the same machine reaches "
+        "comparable quality (within 0.05) — then the faster one wins, so the box "
+        "is fully utilized. Failed categories are never recommended. Assign each "
+        "machine a model per use case from here.</p></div>"
+    )
+
     # Per-use-case leaders, grouped by endpoint (hardware) so you can pick the
     # best model for each use case ON EACH machine, then ranked by quality.
     def _lead_li(r, cat) -> str:
@@ -861,9 +901,13 @@ def render_crossrun(rows: list[Any], categories: list[str],
 .hwname {{ font-size:12px; font-weight:600; color:var(--muted); margin:2px 0; }}
 tr.grouphdr td {{ background:var(--soft-bg); color:var(--fg); font-weight:700;
   padding:6px 10px; border-top:2px solid var(--border); }}
+.reccard {{ margin-bottom:18px; }}
+.reccard h3 {{ margin:4px 0 6px; font-size:14px; }}
 </style></head><body><div class="wrap">
 <h1>AI Benchmark — Cross-run Leaderboard</h1>
 <p class="muted">{len(rows)} model/hardware units pooled across {len(run_meta)} run(s).</p>
+
+{recommendations}
 
 {leaders}
 
