@@ -44,8 +44,11 @@ class RequestResult:
     content_empty: bool = False            # generated tokens but no visible answer
 
     # Derived
-    tokens_per_s: float | None = None      # completion_tokens / gen_s
+    tokens_per_s: float | None = None      # completion_tokens / gen_s (one stream)
     tps_from_total: bool = False           # tok/s fell back to /total_s (tiny gen window)
+    batch_tps: float | None = None         # aggregate tok/s of the concurrent batch
+                                           # (total tokens / wall-clock); None if
+                                           # run single-stream (concurrency == 1)
 
     # Output / diagnostics
     prompt: str = ""                       # the user prompt (for quality review)
