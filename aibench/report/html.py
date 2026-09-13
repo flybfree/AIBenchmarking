@@ -737,6 +737,76 @@ def render_crossrun(rows: list[Any], categories: list[str],
         f"{run_rows}</table></div>"
     )
 
+    # Default model per machine — the single best all-rounder to leave loaded,
+    # shown two ways: each machine's standalone best, and the best complementary
+    # pair (chosen together so the fleet covers every use case).
+    from ..crossrun import best_default_per_machine, best_complementary_combo
+    defaults = best_default_per_machine(rows)
+    combo = best_complementary_combo(rows, categories)
+
+    def _hwcolor(hw: str) -> str:
+        return "hw-a" if "5090" in hw else "hw-b"
+
+    d_cards = "".join(
+        f"<div class='dcard {_hwcolor(hw)}'>"
+        f"<div class='dhw'>{html.escape(hw)}</div>"
+        f"<div class='dmodel'>{html.escape(d.model.split('/')[-1][:48])}</div>"
+        f"<div class='dstat'><b class='{_quality_class(d.overall)}'>{d.overall:.3f}</b>"
+        f"<span class='pm'>overall</span>"
+        + (f"<b>{d.tps:.0f}</b><span class='pm'>tok/s</span>" if d.tps else "")
+        + f"<b>{d.runs}</b><span class='pm'>run(s)</span></div>"
+        f"<div class='muted dnote'>{html.escape(d.note)}</div></div>"
+        for hw, d in sorted(defaults.items(),
+                            key=lambda kv: kv[1].overall, reverse=True)
+    )
+
+    combo_html = ""
+    if combo:
+        worst = min(q for _, _, q in combo.per_use.values())
+        pick_rows = "".join(
+            f"<div class='dcard {_hwcolor(p.hardware)}'>"
+            f"<div class='dhw'>{html.escape(p.hardware)}</div>"
+            f"<div class='dmodel'>{html.escape(p.model.split('/')[-1][:48])}</div>"
+            f"<div class='dstat'>"
+            + (f"<b>{p.tps:.0f}</b><span class='pm'>tok/s</span>" if p.tps else "")
+            + f"<b>{p.runs}</b><span class='pm'>run(s)</span></div>"
+            f"<div class='muted dnote'>serves <b>{html.escape(', '.join(p.covers) or '—')}</b></div>"
+            f"</div>"
+            for p in sorted(combo.picks, key=lambda p: _hwcolor(p.hardware))
+        )
+        route_rows = "".join(
+            f"<tr><td>{html.escape(c)}</td>"
+            f"<td><span class='pill {_hwcolor(hw)}'>{html.escape(hw)}</span></td>"
+            f"<td class='mono'>{html.escape(m.split('/')[-1][:40])}</td>"
+            f"<td class='num'><b class='{_quality_class(q)}'>{q:.2f}</b></td></tr>"
+            for c, (hw, m, q) in combo.per_use.items()
+        )
+        combo_html = (
+            "<h3 class='dsub'>Best complementary pair</h3>"
+            "<p class='muted dintro'>Chosen together so the two machines cover every "
+            f"use case — route each request to the box that serves it best. "
+            f"Fleet coverage <b>{combo.coverage:.3f}</b>, weakest use case "
+            f"<b>{worst:.2f}</b>.</p>"
+            f"<div class='dgrid'>{pick_rows}</div>"
+            "<table class='routetbl'><tr><th>Use case</th><th>Run on</th>"
+            f"<th>Model</th><th>quality</th></tr>{route_rows}</table>"
+        )
+
+    defaults_html = (
+        "<h2>Default model per machine</h2>"
+        "<div class='card'>"
+        "<h3 class='dsub'>Standalone best default</h3>"
+        "<p class='muted dintro'>The best all-round model to leave loaded on each "
+        "machine on its own merits — highest overall quality, preferring a faster "
+        "model when it's within 0.05 of the best (balanced).</p>"
+        f"<div class='dgrid'>{d_cards}</div>"
+        f"{combo_html}"
+        "<p class='muted' style='margin-top:14px'>Overall = mean quality across all "
+        "use cases (a failed category counts as 0). Watch the run count: "
+        "single-run picks (incl. any perfect 1.000) need a confirming run before "
+        "you commit.</p></div>"
+    )
+
     # Best-model-per-machine recommendation: for each endpoint, the model to run
     # for each use case (best quality, or a faster same-machine model of
     # comparable quality). This is the headline for per-machine deployment.
@@ -930,9 +1000,27 @@ tr.grouphdr td {{ background:var(--soft-bg); color:var(--fg); font-weight:700;
   padding:6px 10px; border-top:2px solid var(--border); }}
 .reccard {{ margin-bottom:18px; }}
 .reccard h3 {{ margin:4px 0 6px; font-size:14px; }}
+.dsub {{ margin:4px 0 4px; font-size:14px; }}
+.dsub:not(:first-child) {{ margin-top:22px; padding-top:16px; border-top:1px solid var(--hair); }}
+.dintro {{ margin:0 0 12px; }}
+.dgrid {{ display:grid; grid-template-columns: repeat(auto-fit, minmax(280px,1fr)); gap:12px; }}
+.dcard {{ border:1px solid var(--border); border-left-width:4px; border-radius:8px;
+  padding:12px 14px; background:var(--card); }}
+.dcard.hw-a {{ border-left-color:#3b82f6; }}
+.dcard.hw-b {{ border-left-color:#d98324; }}
+.dhw {{ font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); font-weight:600; }}
+.dmodel {{ font:600 13px ui-monospace, Consolas, monospace; margin:3px 0 8px; word-break:break-word; color:var(--fg); }}
+.dstat {{ display:flex; gap:5px; align-items:baseline; flex-wrap:wrap; font-variant-numeric:tabular-nums; }}
+.dstat b {{ font-size:15px; }} .dstat .pm {{ margin-right:8px; }}
+.dnote {{ margin-top:8px; }}
+.routetbl {{ margin-top:12px; }}
+.pill {{ font-size:11px; font-weight:600; padding:2px 8px; border-radius:20px; color:#fff; white-space:nowrap; }}
+.pill.hw-a {{ background:#3b82f6; }} .pill.hw-b {{ background:#c2703a; }}
 </style></head><body><div class="wrap">
 <h1>AI Benchmark — Cross-run Leaderboard</h1>
 <p class="muted">{len(rows)} model/hardware units pooled across {len(run_meta)} run(s).</p>
+
+{defaults_html}
 
 {recommendations}
 

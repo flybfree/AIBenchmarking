@@ -272,3 +272,145 @@ def per_machine_recommendations(
                             pick_c.tps, len(pick_u.runs), note))
         out[hw] = recs
     return out
+
+
+# --- single-default-per-machine selection ------------------------------------
+
+@dataclass
+class MachineDefault:
+    hardware: str
+    model: str
+    overall: float           # this pick's overall quality
+    top_overall: float       # best overall quality available on the machine
+    tps: float | None        # representative throughput (mean per-category tok/s)
+    runs: int
+    note: str
+
+
+@dataclass
+class ComboPick:
+    hardware: str
+    model: str
+    overall: float
+    tps: float | None
+    runs: int
+    covers: list[str]        # use cases this box's default is the fleet's best at
+
+
+@dataclass
+class Combination:
+    picks: list[ComboPick]
+    coverage: float          # mean over use cases of the best quality the pair reaches
+    per_use: dict            # cat -> (hardware, model, quality) that covers it
+
+
+def _unit_tps(row: ModelRow) -> float | None:
+    """A single representative throughput for a unit: mean of its per-category
+    tok/s. Rough (short-output categories are TTFT-bound) but comparable across
+    units, enough to break quality ties toward the faster model."""
+    vals = [c.tps for c in row.cats.values() if c.tps]
+    return sum(vals) / len(vals) if vals else None
+
+
+def best_default_per_machine(rows: list[ModelRow]) -> dict[str, MachineDefault]:
+    """The single best all-round DEFAULT model to leave loaded on each machine.
+
+    Balanced: rank by overall quality, but prefer a faster model when it's within
+    QUALITY_EPS of the machine's best overall — the fastest all-rounder that's
+    still excellent. Returns {hardware: MachineDefault}."""
+    from .scorecard import QUALITY_EPS
+    by_hw: dict[str, list[ModelRow]] = {}
+    for r in rows:
+        if r.overall_quality is not None:
+            by_hw.setdefault(r.hardware, []).append(r)
+
+    out: dict[str, MachineDefault] = {}
+    for hw, us in by_hw.items():
+        best = max(us, key=lambda u: u.overall_quality)
+        good = [u for u in us if u.overall_quality >= best.overall_quality - QUALITY_EPS]
+        good_tps = [u for u in good if _unit_tps(u)]
+        pick = max(good_tps, key=lambda u: _unit_tps(u)) if good_tps else best
+        tps = _unit_tps(pick)
+        if pick is best:
+            note = (f"top all-round quality ({pick.overall_quality:.3f})"
+                    + (f" · {tps:.0f} tok/s" if tps else ""))
+        else:
+            note = (f"within {QUALITY_EPS:.2f} of the best "
+                    f"({pick.overall_quality:.3f} vs {best.overall_quality:.3f}) "
+                    f"and faster ({tps:.0f} tok/s)")
+        out[hw] = MachineDefault(hw, pick.model, pick.overall_quality,
+                                 best.overall_quality, tps, len(pick.runs), note)
+    return out
+
+
+def best_complementary_combo(
+    rows: list[ModelRow], categories: list[str]
+) -> Combination | None:
+    """Pick one default per machine so the pair, TOGETHER, covers every use case
+    best — route each use case to whichever box's default is stronger at it.
+
+    Fleet coverage = mean over use cases of max(quality across the chosen units).
+    This rewards complementary strengths (e.g. a fast reasoning/code model on one
+    box, a quality writer on the other). Balanced: among combinations within a
+    small margin of the best coverage, prefer the faster one (higher total tok/s).
+    """
+    import itertools
+    from .scorecard import QUALITY_EPS
+
+    by_hw: dict[str, list[ModelRow]] = {}
+    for r in rows:
+        if r.overall_quality is not None:
+            by_hw.setdefault(r.hardware, []).append(r)
+    hws = sorted(by_hw)
+    if not hws:
+        return None
+    # Cap the search: keep each machine's top candidates by overall quality.
+    cand = {hw: sorted(us, key=lambda u: u.overall_quality, reverse=True)[:12]
+            for hw, us in by_hw.items()}
+
+    def cell_q(u: ModelRow, c: str) -> float:
+        cc = u.cats.get(c)
+        if not cc or cc.failed or cc.quality is None:
+            return 0.0
+        return cc.quality
+
+    def route(combo, c):
+        """Which unit serves use case c: the best-quality one, but prefer the
+        faster box when it's within QUALITY_EPS — so bulk work lands on the fast
+        machine and only what it's genuinely weaker at goes to the other."""
+        qs = [(u, cell_q(u, c)) for u in combo]
+        best_q = max(q for _, q in qs)
+        good = [(u, q) for (u, q) in qs if q >= best_q - QUALITY_EPS]
+        return max(good, key=lambda t: _unit_tps(t[0]) or 0)  # (unit, quality)
+
+    # Score every combination on three tiers, applied in order so a strength in
+    # one use case can't average away a weakness in another. Coverage uses the
+    # balanced routing above, so a fast box that's "good enough" is used rather
+    # than funneling everything to one slow high-quality model:
+    #   1. worst-covered use case (maximin) — "cover EVERY use case"
+    #   2. mean coverage — overall strength
+    #   3. total throughput — balanced tiebreak toward the faster pair
+    scored = []
+    for combo in itertools.product(*(cand[hw] for hw in hws)):
+        per = [route(combo, c)[1] for c in categories]
+        scored.append((min(per), sum(per) / len(per),
+                       sum(_unit_tps(u) or 0 for u in combo), combo))
+    if not scored:
+        return None
+    top_min = max(s[0] for s in scored)
+    f1 = [s for s in scored if s[0] >= top_min - QUALITY_EPS]
+    top_mean = max(s[1] for s in f1)
+    f2 = [s for s in f1 if s[1] >= top_mean - QUALITY_EPS]
+    best_combo = max(f2, key=lambda s: s[2])[3]
+
+    # Attribute each use case to the box that serves it under balanced routing.
+    per_use: dict = {}
+    covers: dict[str, list[str]] = {u.hardware: [] for u in best_combo}
+    for c in categories:
+        unit, q = route(best_combo, c)
+        per_use[c] = (unit.hardware, unit.model, q)
+        covers[unit.hardware].append(c)
+    picks = [ComboPick(u.hardware, u.model, u.overall_quality, _unit_tps(u),
+                       len(u.runs), covers[u.hardware]) for u in best_combo]
+    coverage = sum(q for _, _, q in per_use.values()) / len(categories)
+    return Combination(picks, coverage, per_use)
