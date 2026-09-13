@@ -248,18 +248,26 @@ def per_machine_recommendations(
             if not cands:
                 continue
             best_u, best_c = max(cands, key=lambda t: t[1].quality)
-            with_tps = [(u, c) for (u, c) in cands if c.tps]
-            fastest = max(with_tps, key=lambda t: t[1].tps) if with_tps else None
-            if (fastest and fastest[0] is not best_u
-                    and fastest[1].quality >= best_c.quality - QUALITY_EPS):
-                fu, fc = fastest
-                note = (f"comparable quality ({fc.quality:.2f} vs {best_c.quality:.2f}) "
-                        f"at higher speed ({fc.tps:.0f} vs {best_c.tps:.0f} tok/s)")
-                pick_u, pick_c = fu, fc
+            # "Good enough" = within QUALITY_EPS of the best quality on this
+            # machine. Among those, take the FASTEST — not the global-fastest
+            # candidate, which may be well below the quality bar. (Picking the
+            # single fastest and only then checking its quality wrongly fell
+            # back to a slow top-quality model whenever the very fastest model
+            # happened to be low quality, ignoring fast models tied at the top.)
+            good_enough = [(u, c) for (u, c) in cands
+                           if c.quality >= best_c.quality - QUALITY_EPS]
+            with_tps = [(u, c) for (u, c) in good_enough if c.tps]
+            if with_tps:
+                pick_u, pick_c = max(with_tps, key=lambda t: t[1].tps)
             else:
                 pick_u, pick_c = best_u, best_c
+            if pick_u is best_u:
                 note = (f"best quality ({best_c.quality:.2f})"
-                        + (f" @ {best_c.tps:.0f} tok/s" if best_c.tps else ""))
+                        + (f" @ {pick_c.tps:.0f} tok/s" if pick_c.tps else ""))
+            else:
+                vs = f" vs {best_c.tps:.0f}" if best_c.tps else ""
+                note = (f"comparable quality ({pick_c.quality:.2f} vs {best_c.quality:.2f}) "
+                        f"at higher speed ({pick_c.tps:.0f}{vs} tok/s)")
             recs.append(Rec(cat, pick_u.model, pick_c.quality, pick_c.basis,
                             pick_c.tps, len(pick_u.runs), note))
         out[hw] = recs
