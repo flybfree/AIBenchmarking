@@ -11,6 +11,7 @@ across runs) — shown with a sample count so you can judge how solid it is.
 from __future__ import annotations
 
 import json
+import re
 import statistics
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -414,3 +415,63 @@ def best_complementary_combo(
                        len(u.runs), covers[u.hardware]) for u in best_combo]
     coverage = sum(q for _, _, q in per_use.values()) / len(categories)
     return Combination(picks, coverage, per_use)
+
+
+# --- size / efficiency standouts ---------------------------------------------
+
+# Dense parameter count (billions) that fits comfortably in modest VRAM — the
+# ceiling for a "small-footprint" model.
+SMALL_FOOTPRINT_B = 14.0
+
+
+def parse_param_size(model: str) -> tuple[float | None, float | None]:
+    """Best-effort (total_B, active_B) parsed from a model id — the benchmark
+    stores no parameter count, so we read it from the name. total is the largest
+    "<N>b" token (footprint); active is the smallest "a<N>b" token (MoE active
+    params). Either may be None when the name doesn't say."""
+    name = model.split("/")[-1].lower()
+    allb = re.findall(r"(\d+(?:\.\d+)?)b", name)
+    total = max((float(x) for x in allb), default=None)
+    act = re.findall(r"a(\d+(?:\.\d+)?)b", name)
+    active = min((float(x) for x in act), default=None)
+    return total, active
+
+
+@dataclass
+class SizeStandout:
+    model: str
+    hardware: str
+    total_b: float
+    active_b: float | None
+    overall: float
+    runs: int
+
+
+def small_model_standouts(
+    rows: list[ModelRow], max_total_b: float = SMALL_FOOTPRINT_B
+) -> tuple[list[SizeStandout], list[SizeStandout]]:
+    """Two efficiency lenses the raw ranking hides:
+
+    - small-footprint standouts: dense models <= max_total_b params, ranked by
+      overall quality (best quality you can run in little VRAM);
+    - compute-efficient MoEs: models whose *active* params are a small fraction
+      of total (fast decode despite a large footprint).
+
+    Returns (small_footprint, efficient_moe), each sorted best-quality first.
+    Models whose size can't be parsed from the name are skipped."""
+    small, moe = [], []
+    for r in rows:
+        if r.overall_quality is None:
+            continue
+        total, active = parse_param_size(r.model)
+        if total is None:
+            continue
+        s = SizeStandout(r.model, r.hardware, total, active,
+                         r.overall_quality, len(r.runs))
+        if total <= max_total_b:
+            small.append(s)
+        elif active is not None and active <= total / 3:
+            moe.append(s)
+    small.sort(key=lambda s: s.overall, reverse=True)
+    moe.sort(key=lambda s: s.overall, reverse=True)
+    return small, moe

@@ -792,6 +792,54 @@ def render_crossrun(rows: list[Any], categories: list[str],
             f"<th>Model</th><th>quality</th></tr>{route_rows}</table>"
         )
 
+    # Size / efficiency standouts — credit models that punch above their weight,
+    # which the raw overall ranking hides.
+    from ..crossrun import small_model_standouts, SMALL_FOOTPRINT_B
+    small, moe = small_model_standouts(rows)
+    fleet_best = max((r.overall_quality for r in rows
+                      if r.overall_quality is not None), default=None)
+    efficiency_html = ""
+    if small or moe:
+        small_rows = "".join(
+            f"<tr><td class='mono'>{html.escape(s.model.split('/')[-1][:44])}</td>"
+            f"<td class='num'><span class='szbadge'>{s.total_b:.0f}B</span></td>"
+            f"<td class='num'><b class='{_quality_class(s.overall)}'>{s.overall:.3f}</b></td>"
+            f"<td class='num pm'>{s.runs} run(s)</td></tr>"
+            for s in small
+        )
+        insight = ""
+        if small and fleet_best:
+            top = small[0]
+            gap = fleet_best - top.overall
+            insight = (f"<p class='muted dintro'>Your best small model, "
+                       f"<span class='mono'>{html.escape(top.model.split('/')[-1][:40])}</span> "
+                       f"({top.total_b:.0f}B), scores <b>{top.overall:.3f}</b> — within "
+                       f"<b>{gap:.03f}</b> of the fleet's best ({fleet_best:.3f}) at a fraction "
+                       f"of the VRAM. Ideal when you want to run a model alongside others, keep "
+                       f"a big context window, or leave headroom on the 4090. Weak spot: prose "
+                       f"(creative / summarization) — pair with a writer.</p>")
+        moe_note = ""
+        if moe:
+            names = ", ".join(f"{s.model.split('/')[-1].split('-mtp')[0][:26]}" for s in moe[:3])
+            moe_note = (
+                "<h3 class='dsub'>Compute-efficient MoE</h3>"
+                f"<p class='muted dintro'>A different efficiency: the <span class='mono'>a3b</span> "
+                f"models are 35B total but only <b>~3B active</b>, so they decode fast — but they "
+                f"still need the full 35B in VRAM (not small-footprint). Top: "
+                f"<span class='mono'>{html.escape(names)}</span>.</p>")
+        efficiency_html = (
+            "<h2>Punching above its size</h2>"
+            "<div class='card'>"
+            f"<h3 class='dsub'>Small-footprint standouts (&le;{SMALL_FOOTPRINT_B:.0f}B dense)</h3>"
+            f"{insight}"
+            "<table><tr><th>Model</th><th>size</th><th>overall</th><th></th></tr>"
+            f"{small_rows}</table>"
+            f"{moe_note}"
+            "<p class='muted' style='margin-top:12px'>Size is parsed from the model name "
+            "(the benchmark stores no parameter count), so unnamed sizes are omitted.</p>"
+            "</div>"
+        )
+
     defaults_html = (
         "<h2>Default model per machine</h2>"
         "<div class='card'>"
@@ -1016,11 +1064,15 @@ tr.grouphdr td {{ background:var(--soft-bg); color:var(--fg); font-weight:700;
 .routetbl {{ margin-top:12px; }}
 .pill {{ font-size:11px; font-weight:600; padding:2px 8px; border-radius:20px; color:#fff; white-space:nowrap; }}
 .pill.hw-a {{ background:#3b82f6; }} .pill.hw-b {{ background:#c2703a; }}
+.szbadge {{ font:600 11px ui-monospace, Consolas, monospace; padding:2px 7px; border-radius:5px;
+  background:var(--soft-bg); color:var(--fg); border:1px solid var(--border); }}
 </style></head><body><div class="wrap">
 <h1>AI Benchmark — Cross-run Leaderboard</h1>
 <p class="muted">{len(rows)} model/hardware units pooled across {len(run_meta)} run(s).</p>
 
 {defaults_html}
+
+{efficiency_html}
 
 {recommendations}
 
