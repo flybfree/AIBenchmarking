@@ -442,30 +442,44 @@ def _endpoints_html(endpoints: list[dict]) -> str:
     if not endpoints:
         return ""
     has_time = any(e.get("runtime") for e in endpoints)
+    has_tokens = any(e.get("tokens") and e.get("tokens") != "—" for e in endpoints)
+    has_eff = any(e.get("eff_tps") for e in endpoints)
     rows = []
     for e in endpoints:
         time_cell = (f"<td class='num mono'>{html.escape(str(e.get('runtime') or '—'))}</td>"
                      if has_time else "")
+        tok_cell = (f"<td class='num mono'>{html.escape(str(e.get('tokens') or '—'))}</td>"
+                    if has_tokens else "")
+        eff_cell = (f"<td class='num mono'>{html.escape(str(e.get('eff_tps') or '—'))}</td>"
+                    if has_eff else "")
         rows.append(
             "<tr>"
             f"<td><b>{html.escape(str(e.get('name', '')))}</b></td>"
             f"<td>{html.escape(str(e.get('hardware', '') or '—'))}</td>"
             f"<td class='mono'>{html.escape(str(e.get('model', '')))}</td>"
-            f"{time_cell}"
+            f"{time_cell}{tok_cell}{eff_cell}"
             f"<td class='mono muted'>{html.escape(str(e.get('base_url', '')))}</td>"
             "</tr>"
         )
     head = ("<tr><th>Endpoint</th><th>Hardware</th><th>Model</th>"
             + ("<th>Time</th>" if has_time else "")
+            + ("<th>Out tokens</th>" if has_tokens else "")
+            + ("<th>eff tok/s</th>" if has_eff else "")
             + "<th>Base URL</th></tr>")
     models = {e.get("model", "") for e in endpoints}
-    note = ""
+    note_bits = []
     if len(models) > 1:
-        note = (
-            "<p class='muted'>Endpoints run <b>different models</b> — compare "
-            "throughput/quality across them with that in mind (it is not a pure "
-            "hardware A/B).</p>"
-        )
+        note_bits.append(
+            "Endpoints run <b>different models</b> — compare throughput/quality "
+            "across them with that in mind (it is not a pure hardware A/B).")
+    if has_eff:
+        note_bits.append(
+            "<b>Out tokens</b> is the total generated across all tasks × repeats; "
+            "<b>eff tok/s</b> = out tokens ÷ time (the endpoint's real serving rate). "
+            "A verbose model can take far longer at the same per-stream tok/s simply "
+            "by generating more tokens — time and out-tokens show that; tok/s alone "
+            "hides it.")
+    note = f"<p class='muted'>{'<br>'.join(note_bits)}</p>" if note_bits else ""
     return (
         "<h2>Endpoints</h2>"
         f"<div class='card'><table>{head}{''.join(rows)}</table>{note}</div>"
@@ -739,7 +753,8 @@ def render_crossrun(rows: list[Any], categories: list[str],
             f"<div><b>{html.escape(e['name'])}</b> "
             f"<span class='muted'>{html.escape(e['hardware'])}</span> → "
             f"{html.escape(e['model'].split('/')[-1][:40])} "
-            f"<span class='pm'>{html.escape(e['runtime'])}</span></div>"
+            f"<span class='pm'>{html.escape(e['runtime'])} · "
+            f"{html.escape(e.get('tokens','—'))} tok</span></div>"
             for e in eps
         )
         return f"<td class='mono epcell'>{lines}</td>"
