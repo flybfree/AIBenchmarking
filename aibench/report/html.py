@@ -727,14 +727,18 @@ def render_crossrun(rows: list[Any], categories: list[str],
     run_rows = "".join(
         f"<tr><td>{html.escape(m['label'])}</td>"
         f"<td class='muted'>{html.escape(m['started'])}</td>"
+        f"<td class='num mono'>{html.escape(m.get('runtime','—'))}</td>"
         f"<td class='mono'>{html.escape(', '.join(mm.split('/')[-1][:40] for mm in m['models']))}</td>"
         f"</tr>"
         for m in run_meta
     )
     runs_table = (
         "<h2>Runs included</h2><div class='card'><table>"
-        "<tr><th>Run</th><th>Started</th><th>Models</th></tr>"
-        f"{run_rows}</table></div>"
+        "<tr><th>Run</th><th>Started</th><th>Runtime</th><th>Models</th></tr>"
+        f"{run_rows}</table>"
+        "<p class='muted'>Runtime is the generation wall-clock (all tasks × repeats "
+        "across endpoints, run in parallel); reference-based scoring and the external "
+        "LLM-judge run afterward and aren't included.</p></div>"
     )
 
     # Default model per machine — the single best all-rounder to leave loaded,

@@ -117,10 +117,13 @@ def _build_report(payload: dict, out_html: Path) -> Path:
     by_cat = aggregate_by_category(results)
     profiles, categories = build_profiles(by_cat)
     cfg = payload.get("config", {})
+    from .crossrun import run_duration_s, fmt_duration
     meta = {
         "label": cfg.get("label", ""),
         "started_at": payload.get("started_at", ""),
         "finished_at": payload.get("finished_at", ""),
+        "runtime": fmt_duration(run_duration_s(
+            payload.get("started_at"), payload.get("finished_at"))),
         "tasks": ", ".join(cfg.get("tasks", [])),
         "repeats": cfg.get("repeats", ""),
         "concurrency": cfg.get("concurrency", ""),
@@ -305,6 +308,12 @@ def _cmd_run(args) -> int:
         f"tasks={cfg.tasks}, repeats={cfg.repeats}\n")
 
     output = asyncio.run(run(cfg, progress=out))
+
+    from .crossrun import run_duration_s, fmt_duration
+    _dur = run_duration_s(output.started_at, output.finished_at)
+    out(f"\nGeneration runtime: {fmt_duration(_dur)} "
+        f"({len(cfg.endpoints)} endpoint(s), tasks={cfg.tasks}, "
+        f"repeats={cfg.repeats}, concurrency={cfg.concurrency}).")
 
     if not args.no_score:
         from .scoring.run import score_results
