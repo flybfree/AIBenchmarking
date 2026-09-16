@@ -117,15 +117,27 @@ def _build_report(payload: dict, out_html: Path) -> Path:
     by_cat = aggregate_by_category(results)
     profiles, categories = build_profiles(by_cat)
     cfg = payload.get("config", {})
-    from .crossrun import run_duration_s, fmt_duration
-    # Merge captured per-endpoint wall-clock into the endpoint rows for display.
+    from .crossrun import run_duration_s, fmt_duration, fmt_tokens
+    # Merge per-endpoint wall-clock (captured) + total output tokens (summed
+    # from results) into the endpoint rows. Tokens ÷ time = effective throughput,
+    # which explains why a verbose model can take longer at the same tok/s.
     _et = {t.get("name"): t for t in (payload.get("endpoint_times") or [])}
+    _tok: dict = {}
+    for r in payload.get("results", []):
+        if r.get("ok"):
+            _tok[r.get("endpoint")] = _tok.get(r.get("endpoint"), 0) + (r.get("completion_tokens") or 0)
     endpoints_meta = []
     for e in cfg.get("endpoints", []):
         e2 = dict(e)
-        t = _et.get(e.get("name"))
+        name = e.get("name")
+        toks = _tok.get(name, 0)
+        e2["tokens"] = fmt_tokens(toks)
+        t = _et.get(name)
         if t:
             e2["runtime"] = fmt_duration(t.get("duration_s"))
+            dur = t.get("duration_s") or 0
+            if dur > 0 and toks:
+                e2["eff_tps"] = f"{toks / dur:.0f}"
         endpoints_meta.append(e2)
     meta = {
         "label": cfg.get("label", ""),

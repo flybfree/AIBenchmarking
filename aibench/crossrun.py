@@ -38,6 +38,14 @@ def run_duration_s(started: str | None, finished: str | None) -> float | None:
     return None
 
 
+def fmt_tokens(n: int | None) -> str:
+    if not n:
+        return "—"
+    if n >= 1000:
+        return f"{n / 1000:.0f}k"
+    return str(n)
+
+
 def fmt_duration(sec: float | None) -> str:
     if sec is None:
         return "—"
@@ -110,8 +118,15 @@ def load_runs(paths: list[str | Path]) -> LoadedRuns:
             results.append(r)
         # Per-endpoint model + wall-clock. Captured times (endpoint_times) are
         # accurate; older runs without them show the endpoint→model mapping
-        # (always available from config) with an em-dash for time.
+        # (always available from config) with an em-dash for time. Total output
+        # tokens are summed from the results (retroactive for every run) — they
+        # explain wall-clock a verbose model needs at the same tok/s.
         et_by = {t.get("name"): t for t in (payload.get("endpoint_times") or [])}
+        ep_tokens: dict[str, int] = {}
+        for rd in payload.get("results", []):
+            if rd.get("ok"):
+                ep_tokens[rd.get("endpoint")] = (
+                    ep_tokens.get(rd.get("endpoint"), 0) + (rd.get("completion_tokens") or 0))
         endpoints = []
         for e in cfg.get("endpoints", []):
             t = et_by.get(e.get("name"))
@@ -120,6 +135,7 @@ def load_runs(paths: list[str | Path]) -> LoadedRuns:
                 "model": e.get("model", ""),
                 "hardware": e.get("hardware", ""),
                 "runtime": fmt_duration(t["duration_s"]) if t else "—",
+                "tokens": fmt_tokens(ep_tokens.get(e.get("name"), 0)),
             })
         meta.append({
             "label": label,
