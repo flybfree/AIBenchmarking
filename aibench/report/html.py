@@ -441,18 +441,23 @@ def _scorecard_html(profiles: list[Any], categories: list[str], fits: list[Any])
 def _endpoints_html(endpoints: list[dict]) -> str:
     if not endpoints:
         return ""
+    has_time = any(e.get("runtime") for e in endpoints)
     rows = []
     for e in endpoints:
+        time_cell = (f"<td class='num mono'>{html.escape(str(e.get('runtime') or '—'))}</td>"
+                     if has_time else "")
         rows.append(
             "<tr>"
             f"<td><b>{html.escape(str(e.get('name', '')))}</b></td>"
             f"<td>{html.escape(str(e.get('hardware', '') or '—'))}</td>"
             f"<td class='mono'>{html.escape(str(e.get('model', '')))}</td>"
+            f"{time_cell}"
             f"<td class='mono muted'>{html.escape(str(e.get('base_url', '')))}</td>"
             "</tr>"
         )
     head = ("<tr><th>Endpoint</th><th>Hardware</th><th>Model</th>"
-            "<th>Base URL</th></tr>")
+            + ("<th>Time</th>" if has_time else "")
+            + "<th>Base URL</th></tr>")
     models = {e.get("model", "") for e in endpoints}
     note = ""
     if len(models) > 1:
@@ -724,17 +729,38 @@ def render_crossrun(rows: list[Any], categories: list[str],
                     run_meta: list[dict], out_path: str | Path) -> Path:
     """Cross-run leaderboard: every (model @ hardware) pooled across runs."""
     # Runs included.
+    def _ep_cell(m) -> str:
+        eps = m.get("endpoints")
+        if not eps:
+            return (f"<td class='mono'>"
+                    + html.escape(', '.join(mm.split('/')[-1][:40] for mm in m['models']))
+                    + "</td>")
+        lines = "".join(
+            f"<div><b>{html.escape(e['name'])}</b> "
+            f"<span class='muted'>{html.escape(e['hardware'])}</span> → "
+            f"{html.escape(e['model'].split('/')[-1][:40])} "
+            f"<span class='pm'>{html.escape(e['runtime'])}</span></div>"
+            for e in eps
+        )
+        return f"<td class='mono epcell'>{lines}</td>"
+
     run_rows = "".join(
         f"<tr><td>{html.escape(m['label'])}</td>"
         f"<td class='muted'>{html.escape(m['started'])}</td>"
-        f"<td class='mono'>{html.escape(', '.join(mm.split('/')[-1][:40] for mm in m['models']))}</td>"
+        f"<td class='num mono'>{html.escape(m.get('runtime','—'))}</td>"
+        f"{_ep_cell(m)}"
         f"</tr>"
         for m in run_meta
     )
     runs_table = (
         "<h2>Runs included</h2><div class='card'><table>"
-        "<tr><th>Run</th><th>Started</th><th>Models</th></tr>"
-        f"{run_rows}</table></div>"
+        "<tr><th>Run</th><th>Started</th><th>Total</th><th>Endpoint → model (time)</th></tr>"
+        f"{run_rows}</table>"
+        "<p class='muted'><b>Total</b> is the run's generation wall-clock; the "
+        "per-endpoint time beside each model is that endpoint's own wall-clock "
+        "(endpoints run in parallel, so the total ≈ the slowest endpoint). Reference "
+        "scoring and the external LLM-judge run afterward and aren't included. "
+        "Runs before per-endpoint timing show the model with no time (—).</p></div>"
     )
 
     # Default model per machine — the single best all-rounder to leave loaded,
@@ -1066,6 +1092,7 @@ tr.grouphdr td {{ background:var(--soft-bg); color:var(--fg); font-weight:700;
 .pill.hw-a {{ background:#3b82f6; }} .pill.hw-b {{ background:#c2703a; }}
 .szbadge {{ font:600 11px ui-monospace, Consolas, monospace; padding:2px 7px; border-radius:5px;
   background:var(--soft-bg); color:var(--fg); border:1px solid var(--border); }}
+.epcell {{ white-space:normal; }} .epcell div {{ margin:2px 0; line-height:1.4; }}
 </style></head><body><div class="wrap">
 <h1>AI Benchmark — Cross-run Leaderboard</h1>
 <p class="muted">{len(rows)} model/hardware units pooled across {len(run_meta)} run(s).</p>

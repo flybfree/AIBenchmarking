@@ -20,6 +20,7 @@ def save_run(out: RunOutput, output_dir: str | Path) -> Path:
         "config": out.config.to_dict(),
         "started_at": out.started_at,
         "finished_at": out.finished_at,
+        "endpoint_times": out.endpoint_times,
         "results": [asdict(r) for r in out.results],
     }
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

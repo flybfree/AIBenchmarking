@@ -117,10 +117,22 @@ def _build_report(payload: dict, out_html: Path) -> Path:
     by_cat = aggregate_by_category(results)
     profiles, categories = build_profiles(by_cat)
     cfg = payload.get("config", {})
+    from .crossrun import run_duration_s, fmt_duration
+    # Merge captured per-endpoint wall-clock into the endpoint rows for display.
+    _et = {t.get("name"): t for t in (payload.get("endpoint_times") or [])}
+    endpoints_meta = []
+    for e in cfg.get("endpoints", []):
+        e2 = dict(e)
+        t = _et.get(e.get("name"))
+        if t:
+            e2["runtime"] = fmt_duration(t.get("duration_s"))
+        endpoints_meta.append(e2)
     meta = {
         "label": cfg.get("label", ""),
         "started_at": payload.get("started_at", ""),
         "finished_at": payload.get("finished_at", ""),
+        "runtime": fmt_duration(run_duration_s(
+            payload.get("started_at"), payload.get("finished_at"))),
         "tasks": ", ".join(cfg.get("tasks", [])),
         "repeats": cfg.get("repeats", ""),
         "concurrency": cfg.get("concurrency", ""),
@@ -128,7 +140,7 @@ def _build_report(payload: dict, out_html: Path) -> Path:
     return render(
         by_task, by_cat, meta, out_html,
         results=results, diagnostics=diagnose(results),
-        endpoints=cfg.get("endpoints", []),
+        endpoints=endpoints_meta,
         comparisons=compare_categories(by_cat),
         variance=variance_flags(by_cat),
         profiles=profiles, categories=categories,
@@ -305,6 +317,12 @@ def _cmd_run(args) -> int:
         f"tasks={cfg.tasks}, repeats={cfg.repeats}\n")
 
     output = asyncio.run(run(cfg, progress=out))
+
+    from .crossrun import run_duration_s, fmt_duration
+    _dur = run_duration_s(output.started_at, output.finished_at)
+    out(f"\nGeneration runtime: {fmt_duration(_dur)} "
+        f"({len(cfg.endpoints)} endpoint(s), tasks={cfg.tasks}, "
+        f"repeats={cfg.repeats}, concurrency={cfg.concurrency}).")
 
     if not args.no_score:
         from .scoring.run import score_results

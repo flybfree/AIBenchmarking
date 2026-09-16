@@ -14,7 +14,41 @@ import json
 import re
 import statistics
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
+
+
+def _parse_iso(s: str | None):
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s)
+    except (ValueError, TypeError):
+        return None
+
+
+def run_duration_s(started: str | None, finished: str | None) -> float | None:
+    """Wall-clock seconds between a run's started_at and finished_at ISO stamps
+    (the generation phase — scoring/judge run after finished_at). None if either
+    timestamp is missing/unparseable."""
+    a, b = _parse_iso(started), _parse_iso(finished)
+    if a and b:
+        d = (b - a).total_seconds()
+        return d if d >= 0 else None
+    return None
+
+
+def fmt_duration(sec: float | None) -> str:
+    if sec is None:
+        return "—"
+    sec = int(round(sec))
+    h, rem = divmod(sec, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h {m}m"
+    if m:
+        return f"{m}m {s}s"
+    return f"{s}s"
 
 from .client import RequestResult
 
@@ -74,10 +108,26 @@ def load_runs(paths: list[str | Path]) -> LoadedRuns:
                 r = RequestResult(**{k: v for k, v in rd.items() if k in known})
             setattr(r, "run_label", run_id)
             results.append(r)
+        # Per-endpoint model + wall-clock. Captured times (endpoint_times) are
+        # accurate; older runs without them show the endpoint→model mapping
+        # (always available from config) with an em-dash for time.
+        et_by = {t.get("name"): t for t in (payload.get("endpoint_times") or [])}
+        endpoints = []
+        for e in cfg.get("endpoints", []):
+            t = et_by.get(e.get("name"))
+            endpoints.append({
+                "name": e.get("name", ""),
+                "model": e.get("model", ""),
+                "hardware": e.get("hardware", ""),
+                "runtime": fmt_duration(t["duration_s"]) if t else "—",
+            })
         meta.append({
             "label": label,
             "file": p.name,
             "started": payload.get("started_at", "")[:19].replace("T", " "),
+            "runtime": fmt_duration(run_duration_s(
+                payload.get("started_at"), payload.get("finished_at"))),
+            "endpoints": endpoints,
             "models": sorted({e.get("model", "") for e in cfg.get("endpoints", [])}),
         })
     return LoadedRuns(results, meta)
