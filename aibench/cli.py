@@ -118,6 +118,15 @@ def _build_report(payload: dict, out_html: Path) -> Path:
     profiles, categories = build_profiles(by_cat)
     cfg = payload.get("config", {})
     from .crossrun import run_duration_s, fmt_duration
+    # Merge captured per-endpoint wall-clock into the endpoint rows for display.
+    _et = {t.get("name"): t for t in (payload.get("endpoint_times") or [])}
+    endpoints_meta = []
+    for e in cfg.get("endpoints", []):
+        e2 = dict(e)
+        t = _et.get(e.get("name"))
+        if t:
+            e2["runtime"] = fmt_duration(t.get("duration_s"))
+        endpoints_meta.append(e2)
     meta = {
         "label": cfg.get("label", ""),
         "started_at": payload.get("started_at", ""),
@@ -131,7 +140,7 @@ def _build_report(payload: dict, out_html: Path) -> Path:
     return render(
         by_task, by_cat, meta, out_html,
         results=results, diagnostics=diagnose(results),
-        endpoints=cfg.get("endpoints", []),
+        endpoints=endpoints_meta,
         comparisons=compare_categories(by_cat),
         variance=variance_flags(by_cat),
         profiles=profiles, categories=categories,

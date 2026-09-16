@@ -108,12 +108,26 @@ def load_runs(paths: list[str | Path]) -> LoadedRuns:
                 r = RequestResult(**{k: v for k, v in rd.items() if k in known})
             setattr(r, "run_label", run_id)
             results.append(r)
+        # Per-endpoint model + wall-clock. Captured times (endpoint_times) are
+        # accurate; older runs without them show the endpoint→model mapping
+        # (always available from config) with an em-dash for time.
+        et_by = {t.get("name"): t for t in (payload.get("endpoint_times") or [])}
+        endpoints = []
+        for e in cfg.get("endpoints", []):
+            t = et_by.get(e.get("name"))
+            endpoints.append({
+                "name": e.get("name", ""),
+                "model": e.get("model", ""),
+                "hardware": e.get("hardware", ""),
+                "runtime": fmt_duration(t["duration_s"]) if t else "—",
+            })
         meta.append({
             "label": label,
             "file": p.name,
             "started": payload.get("started_at", "")[:19].replace("T", " "),
             "runtime": fmt_duration(run_duration_s(
                 payload.get("started_at"), payload.get("finished_at"))),
+            "endpoints": endpoints,
             "models": sorted({e.get("model", "") for e in cfg.get("endpoints", [])}),
         })
     return LoadedRuns(results, meta)

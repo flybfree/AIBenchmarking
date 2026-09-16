@@ -30,6 +30,8 @@ class RunOutput:
     started_at: str
     finished_at: str = ""
     results: list[RequestResult] = field(default_factory=list)
+    # Per-endpoint wall-clock: [{name, model, hardware, started, finished, duration_s}].
+    endpoint_times: list = field(default_factory=list)
 
 
 def _collect_tasks(suite_names: list[str]) -> list[Task]:
@@ -122,6 +124,25 @@ async def _run_endpoint(
     return results
 
 
+async def _timed_endpoint(
+    cfg: RunConfig, endpoint: Endpoint, tasks: list[Task], progress: ProgressCb,
+) -> tuple[list[RequestResult], dict]:
+    """Run one endpoint and record its own wall-clock, so per-endpoint timing is
+    captured even when endpoints run concurrently."""
+    started = datetime.now(timezone.utc)
+    res = await _run_endpoint(cfg, endpoint, tasks, progress)
+    finished = datetime.now(timezone.utc)
+    timing = {
+        "name": endpoint.name,
+        "model": endpoint.model,
+        "hardware": endpoint.hardware,
+        "started": started.isoformat(),
+        "finished": finished.isoformat(),
+        "duration_s": (finished - started).total_seconds(),
+    }
+    return res, timing
+
+
 async def run(cfg: RunConfig, progress: ProgressCb = print) -> RunOutput:
     tasks = _collect_tasks(cfg.tasks)
     if not tasks:
@@ -137,15 +158,17 @@ async def run(cfg: RunConfig, progress: ProgressCb = print) -> RunOutput:
         progress(f"[running {len(cfg.endpoints)} endpoints in parallel]")
         for e in cfg.endpoints:
             progress(f"[endpoint] {e.name} ({e.model} @ {e.base_url})")
-        results = await asyncio.gather(
-            *(_run_endpoint(cfg, e, tasks, progress) for e in cfg.endpoints)
+        pairs = await asyncio.gather(
+            *(_timed_endpoint(cfg, e, tasks, progress) for e in cfg.endpoints)
         )
-        for res in results:
+        for res, timing in pairs:
             out.results.extend(res)
+            out.endpoint_times.append(timing)
     else:
         for endpoint in cfg.endpoints:
             progress(f"[endpoint] {endpoint.name} ({endpoint.model} @ {endpoint.base_url})")
-            res = await _run_endpoint(cfg, endpoint, tasks, progress)
+            res, timing = await _timed_endpoint(cfg, endpoint, tasks, progress)
             out.results.extend(res)
+            out.endpoint_times.append(timing)
     out.finished_at = datetime.now(timezone.utc).isoformat()
     return out
