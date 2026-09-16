@@ -166,10 +166,20 @@ like the CLI:
 ```
 
 Notes:
-- Build **per-platform** — a Windows build runs on Windows, a Linux build on Linux.
-- The Phase 2 code check runs generated Python in a subprocess; the frozen exe
-  acts as its own Python runner (via an internal `__pyexec__` hook), so code
-  scoring works with no separate Python install on the target.
+- The binary is ~30 MB and starts with no Python environment on the target.
+  Ship `dist/aibench.exe` alone; your `configs/*.yaml` stay external so you can
+  edit endpoints/models without rebuilding.
+- Build **per-platform** — a Windows build runs on Windows, a Linux build on
+  Linux (e.g. build on the Ubuntu box to get a Linux `aibench`).
+- Phase 2 scoring runs generated code in a subprocess; the frozen exe acts as
+  its own runner (via an internal `__pyexec__` hook), so **both** the Python
+  checks *and* the in-memory SQLite (SQL) checks work with no separate Python
+  install on the target.
+- `--judge` still reads the provider key from the environment (e.g.
+  `OPENAI_API_KEY`) exactly like the CLI — set it in the shell that launches the
+  exe; it is never baked into the binary.
+- Optional: install [UPX](https://upx.github.io/) before building to shrink the
+  binary further.
 
 ## Quick start
 
