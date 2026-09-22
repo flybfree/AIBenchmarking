@@ -290,6 +290,24 @@ def _endpoint_preflight(cfg, allow_partial: bool = False) -> int:
     return 0
 
 
+def _write_leaderboard(result_dir) -> tuple[Path, int] | None:
+    """Rebuild the cross-run leaderboard from every result JSON in a directory.
+    Returns (html_path, run_count), or None if there's nothing to pool. Shared by
+    the `leaderboard` command and `run`'s auto-update."""
+    from .crossrun import load_runs, aggregate_by_model
+    from .report import render_crossrun
+    paths = sorted(Path(result_dir).glob("*.json"))
+    if not paths:
+        return None
+    loaded = load_runs(paths)
+    if not loaded.results:
+        return None
+    rows, categories = aggregate_by_model(loaded.results)
+    out_html = Path(result_dir) / "leaderboard.html"
+    render_crossrun(rows, categories, loaded.run_meta, out_html)
+    return out_html, len(loaded.run_meta)
+
+
 def _cmd_run(args) -> int:
     cfg = RunConfig.load(args.config)
     if args.out:
@@ -366,6 +384,15 @@ def _cmd_run(args) -> int:
     html_path = json_path.with_suffix(".html")
     _build_report(payload, html_path)
     out(f"\nReport -> {html_path}")
+
+    # Auto-refresh the cross-run leaderboard so it always reflects this run
+    # (unless disabled). Pools every JSON in the output dir, including the one
+    # just saved.
+    if not args.no_leaderboard:
+        lb = _write_leaderboard(json_path.parent)
+        if lb:
+            out(f"Leaderboard -> {lb[0]} ({lb[1]} runs pooled)")
+
     if args.open:
         import webbrowser
         webbrowser.open(html_path.resolve().as_uri())
@@ -520,6 +547,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Run the Phase 3 LLM-judge (requires a `judge:` endpoint in config).")
     r.add_argument("--no-judge", action="store_true",
                    help="Skip LLM-judging even if a judge endpoint is configured.")
+    r.add_argument("--no-leaderboard", action="store_true",
+                   help="Don't rebuild the cross-run leaderboard after the run "
+                        "(by default the run refreshes <output_dir>/leaderboard.html "
+                        "from all result JSONs).")
     r.add_argument("--open", action="store_true", help="Open the HTML report when done.")
     r.set_defaults(func=_cmd_run)
 
